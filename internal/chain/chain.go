@@ -25,6 +25,18 @@ const (
 	HealthUnhealthy                    // 2: failing probes
 )
 
+// Breaker is the circuit breaker guarding an upstream. It is implemented by
+// the upstream package on top of sony/gobreaker; the interface keeps the
+// chain package free of that dependency. It is wired at startup (router.New)
+// before any request is served.
+type Breaker interface {
+	// Execute runs fn through the breaker and returns its error verbatim
+	// (the upstream package's ErrCircuitOpen when the circuit is open).
+	Execute(fn func() ([]byte, error)) ([]byte, error)
+	// State reports the current breaker state: "closed", "open", "half-open".
+	State() string
+}
+
 // Upstream is a configured RPC endpoint with runtime state. Health and
 // latency are written by the prober and read by the router concurrently;
 // access must go through the accessors (atomic).
@@ -33,8 +45,57 @@ type Upstream struct {
 	URL    *url.URL
 	Client *http.Client // wired by the upstream package (US1); nil until then
 
-	health  int32 // HealthState
-	latency int64 // nanoseconds; EWMA of probe/request latency
+	breaker    Breaker // nil until wired at startup; nil means always closed
+	failStreak int32   // consecutive probe failures
+	health     int32   // HealthState
+	latency    int64   // nanoseconds; EWMA of probe/request latency
+}
+
+// SetBreaker wires the circuit breaker (startup only, before serving).
+func (u *Upstream) SetBreaker(b Breaker) { u.breaker = b }
+
+// Breaker returns the wired circuit breaker (nil if none).
+func (u *Upstream) Breaker() Breaker { return u.breaker }
+
+// Execute runs fn through the upstream's breaker, or directly when no
+// breaker is wired (e.g. unit tests).
+func (u *Upstream) Execute(fn func() ([]byte, error)) ([]byte, error) {
+	if u.breaker == nil {
+		return fn()
+	}
+	return u.breaker.Execute(fn)
+}
+
+// BreakerOpen reports whether the breaker is in the open state (an open
+// upstream is not selectable for routing).
+func (u *Upstream) BreakerOpen() bool {
+	return u.breaker != nil && u.breaker.State() == "open"
+}
+
+// FailStreak returns the current consecutive probe-failure count.
+func (u *Upstream) FailStreak() int { return int(atomic.LoadInt32(&u.failStreak)) }
+
+// RecordProbeOK resets the consecutive probe-failure count.
+func (u *Upstream) RecordProbeOK() { atomic.StoreInt32(&u.failStreak, 0) }
+
+// RecordProbeFail increments the consecutive probe-failure count and returns
+// the new value.
+func (u *Upstream) RecordProbeFail() int { return int(atomic.AddInt32(&u.failStreak, 1)) }
+
+// RecordLatency folds a new sample into the EWMA latency (alpha 0.25; the
+// first sample is taken as-is). Written concurrently by probes and requests;
+// the compare-and-swap loop keeps updates race-free.
+func (u *Upstream) RecordLatency(d time.Duration) {
+	for {
+		prev := time.Duration(atomic.LoadInt64(&u.latency))
+		next := d
+		if prev > 0 {
+			next = prev + time.Duration(float64(d-prev)*0.25)
+		}
+		if atomic.CompareAndSwapInt64(&u.latency, int64(prev), int64(next)) {
+			return
+		}
+	}
 }
 
 // SetHealth updates the health classification (race-safe).

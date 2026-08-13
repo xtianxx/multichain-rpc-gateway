@@ -113,17 +113,17 @@
 
 ### Tests for User Story 3（TDD，先写，预期 FAIL）
 
-- [ ] T029 [P] [US3] 编写重试分类器测试：白名单前缀（eth_get*/eth_call/eth_estimateGas/net_*/web3_*）可重试、`eth_sendTransaction`/`eth_sendRawTransaction` 黑名单永不重试到 internal/upstream/retry_test.go
-- [ ] T030 [P] [US3] 编写熔断+failover 测试：gobreaker 三态、失败切换下一上游、全挂 -32001、总截止 -32005 到 internal/router/failover_test.go
-- [ ] T031 [P] [US3] 编写集成测试：双上游 failover 端到端、写方法 exactly-once、上游非法 JSON → -32002 后切换到 tests/integration/failover_test.go
+- [X] T029 [P] [US3] 编写重试分类器测试：白名单前缀（eth_get*/eth_call/eth_estimateGas/net_*/web3_*）可重试、`eth_sendTransaction`/`eth_sendRawTransaction` 黑名单永不重试到 internal/upstream/retry_test.go
+- [X] T030 [P] [US3] 编写熔断+failover 测试：gobreaker 三态、失败切换下一上游、全挂 -32001、总截止 -32005 到 internal/router/failover_test.go
+- [X] T031 [P] [US3] 编写集成测试：双上游 failover 端到端、写方法 exactly-once、上游非法 JSON → -32002 后切换到 tests/integration/failover_test.go
 
 ### Implementation for User Story 3
 
-- [ ] T032 [US3] 实现 prober：周期探测（默认 10s，`eth_chainId`）、健康状态机（unknown→healthy/unhealthy，连续 N 失败判定）、EWMA 延迟读数，探测走 breaker.Execute() 到 internal/prober/prober.go
-- [ ] T033 [P] [US3] 实现熔断接线：每上游 gobreaker v2（fail_threshold 5 / cooldown 30s / half-open 1 试探），探测失败计入熔断计数到 internal/upstream/breaker.go
-- [ ] T034 [P] [US3] 实现重试与退避：cenkalti/backoff v4（基数 10ms ×2 指数 + 全抖动、max_attempts 2、max_elapsed 30s）、黑名单方法 backoff.Permanent 短路到 internal/upstream/retry.go
-- [ ] T035 [US3] 实现 failover 路由：router 按健康+延迟偏好选上游，失败（超时/网络/非法响应）对安全方法切换下一上游，耗尽返回 -32001/-32005；每请求有界截止时间到 internal/router/router.go（扩展）与 internal/upstream/client.go
-- [ ] T036 [US3] 实现按方法类上游超时：default 10s、eth_getLogs 30s（前缀最长匹配）到 internal/upstream/client.go 或 internal/config 调用点
+- [X] T032 [US3] 实现 prober：周期探测（默认 10s，`eth_chainId`）、健康状态机（unknown→healthy/unhealthy，连续 N 失败判定）、EWMA 延迟读数，探测走 breaker.Execute() 到 internal/prober/prober.go
+- [X] T033 [P] [US3] 实现熔断接线：每上游 gobreaker v2（fail_threshold 5 / cooldown 30s / half-open 1 试探），探测失败计入熔断计数到 internal/upstream/breaker.go
+- [X] T034 [P] [US3] 实现重试与退避：cenkalti/backoff v4（基数 10ms ×2 指数 + 全抖动、max_attempts 2、max_elapsed 30s）、黑名单方法 backoff.Permanent 短路到 internal/upstream/retry.go
+- [X] T035 [US3] 实现 failover 路由：router 按健康+延迟偏好选上游，失败（超时/网络/非法响应）对安全方法切换下一上游，耗尽返回 -32001/-32005；每请求有界截止时间到 internal/router/router.go（扩展）与 internal/upstream/client.go
+- [X] T036 [US3] 实现按方法类上游超时：default 10s、eth_getLogs 30s（前缀最长匹配）到 internal/upstream/client.go 或 internal/config 调用点
 
 **Checkpoint**: US1+US2+US3 独立可测 —— SC-003（failover 100%、写方法不重复）
 

@@ -3,8 +3,10 @@ module github.com/xtianxx/multichain-rpc-gateway
 go 1.26.5
 
 require (
+	github.com/cenkalti/backoff/v4 v4.3.0
 	github.com/prometheus/client_golang v1.24.1
 	github.com/prometheus/client_model v0.6.2
+	github.com/sony/gobreaker/v2 v2.4.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 

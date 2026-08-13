@@ -2,6 +2,7 @@ package chain
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/url"
 	"reflect"
@@ -193,6 +194,100 @@ func TestUpstreamStateRaceSafe(t *testing.T) {
 func TestHealthStateValues(t *testing.T) {
 	if HealthUnknown != 0 || HealthHealthy != 1 || HealthUnhealthy != 2 {
 		t.Error("HealthState values must be 0/1/2")
+	}
+}
+
+// fakeBreaker is a controllable Breaker double for the chain tests.
+type fakeBreaker struct {
+	state string
+	calls int
+	err   error
+}
+
+func (b *fakeBreaker) Execute(fn func() ([]byte, error)) ([]byte, error) {
+	b.calls++
+	if b.state == "open" {
+		return nil, b.err
+	}
+	return fn()
+}
+
+func (b *fakeBreaker) State() string { return b.state }
+
+func TestUpstreamExecuteDelegatesToBreaker(t *testing.T) {
+	u := &Upstream{Name: "a", URL: mustURL(t, "https://a.example.com")}
+
+	// No breaker wired: fn runs directly.
+	ran := false
+	got, err := u.Execute(func() ([]byte, error) { ran = true; return []byte("x"), nil })
+	if err != nil || string(got) != "x" || !ran {
+		t.Fatalf("nil-breaker Execute: got %s err %v ran %v", got, err, ran)
+	}
+	if u.BreakerOpen() {
+		t.Error("nil breaker must not report open")
+	}
+
+	// Breaker wired: fn runs through it; open state short-circuits.
+	b := &fakeBreaker{state: "closed"}
+	u.SetBreaker(b)
+	if _, err := u.Execute(func() ([]byte, error) { return nil, nil }); err != nil || b.calls != 1 {
+		t.Fatalf("wired Execute must delegate once: calls %d err %v", b.calls, err)
+	}
+	if u.Breaker() != b {
+		t.Error("Breaker() must return the wired breaker")
+	}
+
+	b.state = "open"
+	b.err = errors.New("circuit open")
+	ran = false
+	if _, err := u.Execute(func() ([]byte, error) { ran = true; return nil, nil }); err == nil {
+		t.Error("open breaker must short-circuit with error")
+	}
+	if ran {
+		t.Error("open breaker must not run fn")
+	}
+	if !u.BreakerOpen() {
+		t.Error("open state must report BreakerOpen")
+	}
+	b.state = "half-open"
+	if u.BreakerOpen() {
+		t.Error("half-open must not report BreakerOpen")
+	}
+}
+
+func TestUpstreamProbeStreak(t *testing.T) {
+	u := &Upstream{Name: "a", URL: mustURL(t, "https://a.example.com")}
+	if u.FailStreak() != 0 {
+		t.Fatal("initial streak must be 0")
+	}
+	if got := u.RecordProbeFail(); got != 1 {
+		t.Fatalf("first fail: got %d", got)
+	}
+	if got := u.RecordProbeFail(); got != 2 {
+		t.Fatalf("second fail: got %d", got)
+	}
+	u.RecordProbeOK()
+	if u.FailStreak() != 0 {
+		t.Fatal("probe ok must reset streak")
+	}
+}
+
+func TestUpstreamRecordLatencyEWMA(t *testing.T) {
+	u := &Upstream{Name: "a", URL: mustURL(t, "https://a.example.com")}
+	// First sample taken as-is.
+	u.RecordLatency(100 * time.Millisecond)
+	if u.Latency() != 100*time.Millisecond {
+		t.Fatalf("first sample: got %v", u.Latency())
+	}
+	// alpha 0.25: next = prev + (d-prev)*0.25
+	u.RecordLatency(200 * time.Millisecond)
+	if got := u.Latency(); got != 125*time.Millisecond {
+		t.Fatalf("ewma step: got %v want 125ms", got)
+	}
+	// Raw SetLatency accessor still works alongside.
+	u.SetLatency(42 * time.Millisecond)
+	if u.Latency() != 42*time.Millisecond {
+		t.Fatalf("raw accessor: got %v", u.Latency())
 	}
 }
 

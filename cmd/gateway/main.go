@@ -25,6 +25,7 @@ import (
 	"github.com/xtianxx/multichain-rpc-gateway/internal/config"
 	"github.com/xtianxx/multichain-rpc-gateway/internal/logging"
 	"github.com/xtianxx/multichain-rpc-gateway/internal/metrics"
+	"github.com/xtianxx/multichain-rpc-gateway/internal/prober"
 	"github.com/xtianxx/multichain-rpc-gateway/internal/router"
 )
 
@@ -85,6 +86,11 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	// Active upstream health probing (US3): eth_chainId probes feed the
+	// health state machine and the circuit breakers. Runs until shutdown.
+	pr := prober.New(rt.Chains(), cfg.Prober, logger)
+	go pr.Start(ctx)
 
 	errCh := make(chan error, 2)
 	go func() { errCh <- rpcServer.ListenAndServe() }()
