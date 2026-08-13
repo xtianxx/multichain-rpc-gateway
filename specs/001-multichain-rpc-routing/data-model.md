@@ -11,8 +11,8 @@
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | `chain_id` | string（十进制规范形，如 `"8453"`） | 全局唯一键；来自 `X-Chain-Id` 头或 `x-chain-id` override，数字输入归一化后比较 |
-| `adapter` | Adapter 接口 | 链特定行为：EIP-1898 块参数归一化、方法分类辅助；`ethereum`（chain 1）、`base`（chain 8453） |
-| `upstreams` | []*Upstream | 有序列表（配置顺序），路由按健康+延迟偏好选择 |
+| `adapter` | Adapter 接口 | 链特定行为：EIP-1898 请求归一化、响应整形（response shaping）、原生币（native currency）处理、方法分类辅助；`ethereum`（chain 1）、`base`（chain 8453） |
+| `upstreams` | []*Upstream | 有序列表（配置顺序）；路由排序规则（权威定义）：healthy 优先 → EWMA 延迟升序 → unknown 垫底（unknown 可用但最低优先级） |
 
 **校验规则**（加载时失败即启动失败）：
 - `chain_id` 必须为十进制非负整数；重复 chain_id 拒绝
@@ -68,7 +68,7 @@ unknown ──probe ok──▶ healthy ──probe fail──▶ unhealthy
   └──────连续失败◀───────┘  └────probe ok（恢复）──┘
 ```
 
-- 初始 `unknown`：不参与「健康偏好」排名（视为最低优先级，但可用）
+- 初始 `unknown`：不参与「健康偏好」排名（最低优先级但可用；排序规则见 §1.1）
 - 连续 N 次探测失败（默认 3）→ `unhealthy`；恢复探测成功即回 `healthy`（有界防抖）
 
 ### 2.2 熔断器三态（gobreaker）

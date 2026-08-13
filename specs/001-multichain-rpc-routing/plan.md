@@ -14,7 +14,7 @@
 
 **Language/Version**: Go 1.26.x（go1.26.5，2026-07；Go 1.27 发布后可直接升级；利用 log/slog、增强版 ServeMux）
 
-**Primary Dependencies**: 标准库 net/http（路由+上游客户端）+ 4 个第三方库：sony/gobreaker/v2 v2.4.0（熔断）、cenkalti/backoff/v4 v4.3.0（重试退避）、prometheus/client_golang v1.24.1（指标）、gopkg.in/yaml.v3 v3.0.1（配置）；JSON-RPC 信封手写薄层
+**Primary Dependencies**: 标准库 net/http（路由+上游客户端）+ 4 个运行时第三方库依赖：sony/gobreaker/v2 v2.4.0（熔断）、cenkalti/backoff/v4 v4.3.0（重试退避）、prometheus/client_golang v1.24.1（指标）、gopkg.in/yaml.v3 v3.0.1（配置）；JSON-RPC 信封手写薄层；vegeta 与 mock-upstream 工具为 dev/test-only，非运行时依赖
 
 **Storage**: N/A（无持久化；routing record 为瞬时非持久数据）
 
@@ -75,7 +75,7 @@ internal/
 ├── metrics/              # Prometheus 注册与收集（metrics-contract 实现）
 └── logging/              # slog 装配 + 白名单/ReplaceAttr 双重脱敏
 config.example.yaml       # 占位符示例（Ethereum mainnet + Base）
-docs/adr/                 # ADR（0001 Go 语言/运行时 等）
+docs/adr/                 # ADR（0001 Go 语言/运行时、0002 JSON-RPC 手写层与库级选型）
 tests/
 ├── integration/          # 进程内 mock 上游端到端测试（双链、failover、混合 batch）
 └── conformance/          # JSON-RPC 2.0 一致性向量表
@@ -90,4 +90,4 @@ bench/                    # 增量延迟基准：BenchmarkDirect vs BenchmarkGat
 
 > **Fill ONLY if Constitution Check has violations that must be justified**
 
-无违规。设计仅引入 4 个第三方库（gobreaker、backoff、client_golang、yaml.v3），无投机抽象、无额外项目/服务，符合宪法 YAGNI 与单节点 v1 范围。
+无违规。设计仅引入 4 个运行时第三方库依赖（gobreaker、backoff、client_golang、yaml.v3；vegeta、mock-upstream 等为 dev/test-only，非运行时依赖），无投机抽象、无额外项目/服务，符合宪法 YAGNI 与单节点 v1 范围。

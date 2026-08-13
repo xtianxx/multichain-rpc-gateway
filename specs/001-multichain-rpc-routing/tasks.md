@@ -8,7 +8,7 @@
 
 **Organization**: 按用户故事分组（US1→US4），每个故事独立实现、独立测试、独立交付。
 
-**Tech Stack**: Go 1.26 · 标准库 net/http + slog · 依赖仅 4 个：sony/gobreaker/v2 v2.4.0、cenkalti/backoff/v4 v4.3.0、prometheus/client_golang v1.24.1、gopkg.in/yaml.v3 v3.0.1
+**Tech Stack**: Go 1.26 · 标准库 net/http + slog · 运行时依赖仅 4 个（vegeta、mock-upstream 等工具为 dev/test-only，非运行时依赖）：sony/gobreaker/v2 v2.4.0、cenkalti/backoff/v4 v4.3.0、prometheus/client_golang v1.24.1、gopkg.in/yaml.v3 v3.0.1
 
 **Module**: `github.com/xtianxx/multichain-rpc-gateway`
 
@@ -25,7 +25,7 @@
 **Purpose**: 项目初始化与基础结构
 
 - [ ] T001 初始化 Go module `github.com/xtianxx/multichain-rpc-gateway` 并引入 4 个依赖（gobreaker/v2 v2.4.0、backoff/v4 v4.3.0、prometheus/client_golang v1.24.1、yaml.v3 v3.0.1）写入 go.mod
-- [ ] T002 [P] 编写 ADR 记录语言/运行时决策（decision/context/rejected alternatives）到 docs/adr/0001-language-runtime-go.md
+- [ ] T002 [P] 编写 ADR 到 docs/adr/：0001-language-runtime-go.md（语言/运行时决策）；0002-jsonrpc-envelope-handwritten.md（手写 JSON-RPC 薄层 vs go-ethereum/rpc 与 JSON-RPC 库——方法注册模型与透传方向相反、geth LGPL/GPL 许可负担；含库级选型 gobreaker/backoff/client_golang/yaml、x-chain-id 命名、-32000~-32005 错误码分配），均含 decision/context/rejected alternatives
 - [ ] T003 [P] 创建 config.example.yaml（Ethereum mainnet chain_id "1" + Base chain_id "8453"，`${ETH_MAINNET_RPC_URL}` / `${BASE_RPC_URL}` 占位符，含 server/prober/retry/circuit 全部字段）
 - [ ] T004 [P] 创建 Makefile（targets：demo、demo-failover、test、test-conformance、lint、bench、load）
 - [ ] T005 [P] 创建 .gitignore（忽略二进制、.env、config.yaml 等含 secrets 文件）
@@ -52,9 +52,9 @@
 
 - [ ] T011 [P] 实现 config 包：YAML 解析（KnownFields 严格模式）+ 手写 `${VAR}` 正则替换（yaml.Unmarshal 前、未设置 fail-fast）+ 启动期校验到 internal/config/config.go
 - [ ] T012 [P] 实现 jsonrpc 包：信封类型（json.RawMessage 保 id 逐字节）、解析/校验、错误码表（标准 -32700/-32600/-32601/-32602/-32603 + 网关 -32000~-32005）到 internal/jsonrpc/envelope.go 与 internal/jsonrpc/errors.go
-- [ ] T013 [P] 实现 chain 包：Chain/Upstream 结构、Adapter 接口 + 注册表、ethereum 与 base adapter（EIP-1898 归一化）到 internal/chain/chain.go、internal/chain/ethereum.go、internal/chain/base.go
+- [ ] T013 [P] 实现 chain 包：Chain/Upstream 结构、Adapter 接口 + 注册表、ethereum 与 base adapter（EIP-1898 请求归一化、响应整形、原生币处理）到 internal/chain/chain.go、internal/chain/ethereum.go、internal/chain/base.go
 - [ ] T014 [P] 实现 logging 包：slog JSON handler 装配 + 白名单/ReplaceAttr 双重脱敏到 internal/logging/logging.go
-- [ ] T015 [P] 实现 metrics 包：gateway_requests_total（Counter）、gateway_request_duration_seconds（Histogram，低段加密桶 [0.0001...10]）、gateway_upstream_up / probe_latency / circuit_state（Gauge）注册到 internal/metrics/metrics.go
+- [ ] T015 [P] 实现 metrics 包：gateway_requests_total（Counter）、gateway_request_duration_seconds（Histogram，低段加密桶 [0.0001...10]）、gateway_requests_inflight（Gauge，chain/upstream）、gateway_upstream_up（Gauge：0=unhealthy / 1=healthy / 2=unknown）/ probe_latency / circuit_state（Gauge）注册到 internal/metrics/metrics.go；gateway_request_duration_seconds 的 method label 若基数失控收敛为 chain+upstream 两维（metrics-contract §2）
 - [ ] T016 全量验证：`go build ./...` + `go test ./...` 全绿，`go vet ./...` 无告警
 
 **Checkpoint**: 基础层就绪 —— 用户故事可并行开始
@@ -76,8 +76,8 @@
 
 - [ ] T019 [P] [US1] 实现 upstream 转发客户端：每上游独立 http.Client + Transport 连接池、按方法类 context.WithTimeout、响应校验（合法 JSON-RPC 且 id 匹配，否则 -32002）到 internal/upstream/client.go
 - [ ] T020 [P] [US1] 实现 router：链解析（头 → chain_id 规范形）、上游选择（v1 基础：取第一个可用）、RoutingRecord（chain/method/upstream/outcome/latency）到 internal/router/router.go
-- [ ] T021 [US1] 实现 cmd/gateway/main.go：flag 解析、config 加载、slog/Prometheus 装配、HTTP handler（POST /：单请求 → router → upstream → 响应回显）、优雅停机
-- [ ] T022 [US1] 补齐 US1 错误路径：未知链 -32000（含 data 上下文 `{"chainId":...}`）、-32002 无效上游响应；保证畸形请求先拒后转（FR-016）
+- [ ] T021 [US1] 实现 cmd/gateway/main.go：flag 解析、config 加载、slog/Prometheus 装配、HTTP handler（POST /：单请求 → router → upstream → 响应回显；`eth_subscribe` 网关侧拒绝返回 -32601，v1 无 WebSocket）、优雅停机
+- [ ] T022 [US1] 补齐 US1 错误路径：未知链 -32000（含 data 上下文 `{"chain_id":...}`）、-32002 无效上游响应；保证畸形请求先拒后转（FR-016）
 
 **Checkpoint**: User Story 1 独立可测 —— 双 mock 上游路由正确、-32000 不转发
 
@@ -98,7 +98,7 @@
 
 - [ ] T025 [US2] 实现 batch 解析与装配：`[]json.RawMessage` 逐元素处理、保序响应数组、notification 不占位、全 notification 空 body 到 internal/jsonrpc/batch.go
 - [ ] T026 [US2] 实现每元素链覆盖：`x-chain-id` 字段解析（string/number → 十进制规范形，优先于头、缺失继承头）、校验后剥离不转发到 internal/router/batch.go（或 router 现有文件扩展）
-- [ ] T027 [US2] 实现 handler batch 编排：POST / 首 token 判定单请求 vs batch、逐元素校验先拒后转、元素级错误（-32000/-32002 等）不阻断兄弟元素到 cmd/gateway/handler.go
+- [ ] T027 [US2] 实现 handler batch 编排：POST / 首 token 判定单请求 vs batch、逐元素校验先拒后转、`eth_subscribe` 元素 → -32601（v1 无 WebSocket）、元素级错误（-32000/-32002 等）不阻断兄弟元素到 cmd/gateway/handler.go
 - [ ] T028 [US2] 实现批量限制：max_batch_elements（默认 100，超限 -32003）、max_body_bytes（默认 1 MB，超限 HTTP 400 + -32004），参数取自 config 到 cmd/gateway/handler.go 或 internal/config 调用点
 
 **Checkpoint**: US1 + US2 均独立可测 —— SC-004 一致性向量全过
@@ -142,7 +142,7 @@
 
 ### Implementation for User Story 4
 
-- [ ] T039 [US4] 在请求路径埋点：router/upstream 记录 gateway_requests_total（outcome 含错误码）与 gateway_request_duration_seconds（含上游 RTT）
+- [ ] T039 [US4] 在请求路径埋点：router/upstream 记录 gateway_requests_total（outcome 含错误码）与 gateway_request_duration_seconds（含上游 RTT）；入站递增、完成递减 gateway_requests_inflight
 - [ ] T040 [US4] 埋点健康指标：prober/breaker 更新 gateway_upstream_up、gateway_upstream_probe_latency_seconds、gateway_upstream_circuit_state gauge
 - [ ] T041 [US4] 接线 HTTP 端点：GET /metrics（promhttp.Handler + go/process collectors）、GET /healthz（200 纯文本）到 cmd/gateway/main.go（metrics_listen 独立监听）
 - [ ] T042 [US4] 每请求结构化日志：chain/method/upstream/outcome/latency/retries（RoutingRecord 流入 slog，脱敏后输出）
@@ -160,8 +160,8 @@
 - [ ] T045 [P] 实现 mock 上游二进制（支持 eth_chainId 等常用方法与故障注入开关）到 cmd/mockupstream/main.go
 - [ ] T046 [P] 编写 demo 脚本与 Makefile 接线：make demo（2 mock 上游 + 网关 + 打印测试命令）、make demo-failover（故障注入端到端演示）
 - [ ] T047 [P] 提供 Grafana 示例面板：每链 QPS/错误率/p50/p95、上游健康热力表到 docs/grafana/example-dashboard.json
-- [ ] T048 [P] 配置 CI：.github/workflows/ci.yml（gofmt 检查 + go vet + go test ./... + test-conformance，全部门禁失败阻断合并）
-- [ ] T049 全量验收 quickstart.md：make test、make test-conformance、make lint、make bench（p50 增量 ≤ 直连 +20%）、make load（vegeta 1000 req/s 60s，SC-006）逐项通过并记录结果
+- [ ] T048 [P] 配置 CI：.github/workflows/ci.yml（gofmt 检查 + go vet + go test ./... + test-conformance + make bench：p50 对比直连基线、回归 >20% 阻断合并（FR-017 门禁），全部门禁失败阻断合并）
+- [ ] T049 全量验收 quickstart.md：make test、make test-conformance、make lint、make bench（p50 增量 ≤ 直连 +20%）、make load（vegeta 1000 req/s 60s：成功率 100%、零丢弃、gateway_requests_inflight 有界，SC-006）逐项通过并记录结果
 - [ ] T050 最终代码清理：gofmt -l 为空、go vet 无告警、无 TODO 遗留、secrets 检查（git grep -E '\$\{|PRIVATE_KEY|API_KEY' 确认无真实 secret）
 
 **Checkpoint**: 全部交付 —— SC-001~SC-006 均可复现验证

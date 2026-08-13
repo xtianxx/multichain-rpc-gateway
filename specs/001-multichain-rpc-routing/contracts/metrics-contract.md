@@ -11,13 +11,14 @@
 | 指标 | 类型 | Labels | 说明 |
 |------|------|--------|------|
 | `gateway_requests_total` | Counter | `chain`, `upstream`, `method`, `outcome` | 每链/每上游/每方法的请求数与结果；`outcome` ∈ {`success`, `-32000`, `-32001`, `-32002`, `-32003`, `-32004`, `-32005`, `-32600`, `-32700`, …}；请求率与错误率由此导出 |
-| `gateway_request_duration_seconds` | Histogram | `chain`, `upstream`, `method` | 端到端延迟（含上游 RTT）；自定义低段加密桶 `[0.0001, 0.00025, 0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10]`；p50/p95/p99 由 `histogram_quantile` 计算 |
+| `gateway_request_duration_seconds` | Histogram | `chain`, `upstream`, `method` | 端到端延迟（含上游 RTT）；自定义低段加密桶 `[0.0001, 0.00025, 0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10]`；p50/p95/p99 由 `histogram_quantile` 计算；若 `method` label 基数失控，收敛为 `chain`+`upstream` 两维（见 §2） |
+| `gateway_requests_inflight` | Gauge | `chain`, `upstream` | 当前进行中（已接收入站、尚未完成响应）的请求数；SC-006 负载验收的队列增长有界性证据 |
 
 ### 健康与熔断（FR-007/008/012）
 
 | 指标 | 类型 | Labels | 说明 |
 |------|------|--------|------|
-| `gateway_upstream_up` | Gauge | `chain`, `upstream` | 1 = probe 判定 healthy，0 = unhealthy/unknown |
+| `gateway_upstream_up` | Gauge | `chain`, `upstream` | 0 = unhealthy，1 = healthy（probe 判定），2 = unknown（初始态：可用但最低优先级） |
 | `gateway_upstream_probe_latency_seconds` | Gauge | `chain`, `upstream` | 最近一次探测往返耗时 |
 | `gateway_upstream_circuit_state` | Gauge | `chain`, `upstream` | 0 = closed，1 = open，2 = half-open |
 

@@ -107,18 +107,18 @@ An operator can inspect what the gateway is doing without seeing user payloads: 
 - **FR-001**: The gateway MUST expose a single unified HTTP endpoint for every supported chain; the client addresses the target chain via the `X-Chain-Id` HTTP header. In batch requests, an element MAY carry a per-element chain override field (exact field name fixed during planning) that takes precedence over the header; without an override, the element inherits the header's chain.
 - **FR-002**: The gateway MUST resolve the target chain from the request addressing and reject requests for unknown or unconfigured chains with a documented error code in -32000 to -32099.
 - **FR-003**: The gateway MUST forward each valid request to a configured upstream for the resolved chain and return the upstream's result with the exact request id.
-- **FR-004**: The gateway MUST validate the JSON-RPC 2.0 envelope before forwarding: parse errors (-32700), invalid request (-32600), method not found (-32601), and invalid params (-32602) per spec.
+- **FR-004**: The gateway MUST validate the JSON-RPC 2.0 envelope before forwarding: parse errors (-32700), invalid request (-32600), method not found (-32601), invalid params (-32602), and internal error (-32603) per spec. Unknown methods are forwarded upstream (an upstream -32601 is passed through); the gateway itself returns -32601 only for the explicit `eth_subscribe` deny-list (no WebSocket in v1).
 - **FR-005**: The gateway MUST support batch requests with ordered responses and notification semantics per the JSON-RPC 2.0 spec.
 - **FR-006**: Gateway-specific failures (upstream unreachable, chain not configured, upstream invalid response) MUST use documented error codes in the reserved range -32000 to -32099.
-- **FR-007**: The gateway MUST support multiple upstreams per chain and prefer healthy, low-latency upstreams when routing.
+- **FR-007**: The gateway MUST support multiple upstreams per chain and prefer healthy, low-latency upstreams when routing. 排序规则：healthy 优先 → EWMA 延迟升序 → unknown 垫底（可用但最低优先级）；权威排序定义见 data-model.md §1.1。
 - **FR-008**: The gateway MUST run active, probe-based health checks whose results feed routing decisions.
-- **FR-009**: On upstream failure, the gateway MUST fail over to another upstream for the same chain or return a structured server error within a bounded deadline; it MUST NOT hang or swallow requests.
+- **FR-009**: On upstream failure, the gateway MUST fail over to another upstream for the same chain or return a structured server error within a bounded deadline; it MUST NOT hang or swallow requests. Gateway error codes: -32001 (upstream unavailable) and -32005 (upstream timeout / overall deadline exceeded); default deadlines are 10s for a single attempt (`server.timeouts.default`) and 30s overall (`retry.max_elapsed`), both configurable (defaults in config-contract.md).
 - **FR-010**: Automatic retries MUST apply only to safe/idempotent methods (read-only methods and state-simulation methods such as `eth_call` and `eth_estimateGas`); state-changing methods (`eth_sendTransaction`, `eth_sendRawTransaction`) MUST NEVER be retried automatically.
-- **FR-011**: Retries MUST use exponential backoff with jitter and hard caps on both the number of attempts and the total deadline.
+- **FR-011**: Retries MUST use exponential backoff with jitter and hard caps on both the number of attempts and the total deadline. Default caps: `max_attempts=2` (includes the first attempt) and `max_elapsed=30s`, both configurable (defaults in config-contract.md).
 - **FR-012**: Circuit breakers MUST stop routing to upstreams that repeatedly fail, and allow them back only after recovery probes pass.
 - **FR-013**: Structured logging MUST record each request's chain, method, selected upstream, latency, and outcome; payloads MUST NOT be logged in full; sensitive fields (private keys, addresses, tokens) MUST be redacted.
-- **FR-014**: Metrics MUST cover request rate, error rate, and latency percentiles per chain and per upstream, exposed via a Prometheus-format pull endpoint.
-- **FR-015**: Supported chains MUST be declarable purely via configuration (adding a chain requires configuration plus a new adapter, never a change to the routing core), and chain-specific behavior (e.g., EIP-1898 block parameter normalization) MUST be isolated in per-chain adapters.
+- **FR-014**: Metrics MUST cover request rate, error rate, and latency percentiles per chain and per upstream, exposed via a Prometheus-format pull endpoint at `GET /metrics` (Prometheus); liveness/readiness is served at `GET /healthz`. The gateway MUST shut down gracefully on SIGTERM/SIGINT: drain in-flight requests and stop the prober before exiting.
+- **FR-015**: Supported chains MUST be declarable purely via configuration (adding a chain requires configuration plus a new adapter, never a change to the routing core), and chain-specific behavior (e.g., EIP-1898 request normalization, response shaping, and native currency handling) MUST be isolated in per-chain adapters.
 - **FR-016**: Malformed or invalid requests MUST be rejected before being forwarded to any upstream.
 - **FR-017**: The gateway MUST ship a benchmark that measures passthrough overhead (gateway-added latency excluding upstream latency), and a merge that degrades p50 overhead by more than 20% requires written justification.
 - **FR-018**: The gateway MUST accept JSON-RPC 2.0 requests over HTTP. WebSocket transport (subscriptions such as `eth_subscribe`) is out of scope for v1.
@@ -126,7 +126,7 @@ An operator can inspect what the gateway is doing without seeing user payloads: 
 
 ### Key Entities *(include if feature involves data)*
 
-- **Chain**: A supported network; identified by chain id; carries its configured upstream list and its adapter behavior (block parameter normalization, native currency handling).
+- **Chain**: A supported network; identified by chain id; carries its configured upstream list and its adapter behavior (EIP-1898 request normalization, response shaping, native currency handling).
 - **Upstream**: A concrete JSON-RPC endpoint for one chain; carries its health state (healthy/unhealthy, measured latency, circuit state) and its connection credentials (never committed to the repository).
 - **Routing record**: A transient, non-persisted trace of one request: chain, method, selected upstream, latency, and outcome; source of logs and metrics.
 - **Health probe result**: The current availability and latency reading for one upstream, produced by active probing and consumed by routing decisions.
@@ -136,11 +136,11 @@ An operator can inspect what the gateway is doing without seeing user payloads: 
 ### Measurable Outcomes
 
 - **SC-001**: A standard client library (ethers.js, viem, or web3.js) can be pointed at the gateway and use every supported chain without client-side changes, with correct results on 100% of requests in the conformance test suite.
-- **SC-002**: The gateway's added latency at p50, excluding upstream latency, stays within 20% of the direct-upstream baseline as measured by the included benchmark under ~1,000 req/s sustained load.
+- **SC-002**: The gateway's added latency at p50, excluding upstream latency, does not exceed 20% above the direct-upstream baseline as measured by the included benchmark under ~1,000 req/s sustained load (one-sided gate, 与 FR-017 合并门禁一致).
 - **SC-003**: With two upstreams configured for a chain and one forced down, 100% of read requests succeed via failover in the mock test environment, and state-changing requests are never duplicated.
 - **SC-004**: The gateway passes all JSON-RPC 2.0 conformance vectors: id echo, result/error exclusivity, standard error codes, batch ordering, and notification handling.
-- **SC-005**: Adding support for a new chain is demonstrated to require only configuration plus a new adapter, with zero changes to routing-core behavior.
-- **SC-006**: The gateway sustains at least 1,000 requests per second on a single node against mock upstreams in the load test environment, without unbounded queue growth or dropped requests.
+- **SC-005**: Adding support for a new chain is demonstrated to require only configuration plus a new adapter, with zero changes to routing-core behavior. The demonstration is non-vacuous: at least one demo adapter must exhibit meaningfully chain-specific behavior (e.g., error-code mapping or parameter normalization).
+- **SC-006**: The gateway sustains at least 1,000 requests per second on a single node against mock upstreams in the load test environment, with 100% of requests completed (zero dropped) and bounded queue growth as evidenced by the `gateway_requests_inflight` gauge staying bounded for the duration of the load test.
 
 ## Assumptions
 

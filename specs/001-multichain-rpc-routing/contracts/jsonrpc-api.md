@@ -73,7 +73,7 @@ v1 无 WebSocket；`eth_subscribe` 类订阅方法返回 -32601 Method not found
 | -32004 | Request body too large | body > `max_body_bytes`（默认 1 MB） |
 | -32005 | Upstream timeout | 上游超时且无 failover 目标 / 总截止超时 |
 
-错误对象 shape：`{"code": N, "message": "<稳定英文描述>", "data": {…}}`；`data` 在网关码下携带结构化上下文（如 `{"chainId":"999"}`）。网关码的 message 为稳定契约，客户端可编程依赖 code。
+错误对象 shape：`{"code": N, "message": "<稳定英文描述>", "data": {…}}`；`data` 在网关码下携带结构化上下文（如 `{"chain_id":"999"}`，chain_id 采用配置规范形）。网关码的 message 为稳定契约，客户端可编程依赖 code。
 
 ## 7. Batch 语义汇总
 

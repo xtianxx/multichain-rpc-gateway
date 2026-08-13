@@ -29,10 +29,12 @@
 | Prometheus 指标 | prometheus/client_golang + `promhttp.Handler()`；延迟用 **HistogramVec**（labels: chain, upstream, method）+ 低段加密自定义桶 `[0.1ms … 10s]`；用 Histogram 不用 Summary | v1.24.1 (2026-07) |
 | 结构化日志 | 标准库 log/slog JSON handler，唯一日志依赖；白名单字段 + `ReplaceAttr` 双重脱敏；不用 zerolog/zap（热路径日志量趋零，性能差异无关） | stdlib (≥1.21) |
 | YAML 配置 | gopkg.in/yaml.v3 + **手写** `${VAR}` 替换（yaml.Unmarshal 前正则替换、未设置即 fail-fast；不用 os.ExpandEnv 避免误伤 `$`） | v3.0.1 |
-| 基准测试 | 进程内 `testing.B` 测增量延迟（BenchmarkDirect vs BenchmarkGateway 对比 httptest 上游）+ **vegeta** 做 1,000 req/s 持续负载（两侧 p50 对比） | v12.13.0 |
+| 基准测试 | 进程内 `testing.B` 测增量延迟（BenchmarkDirect vs BenchmarkGateway 对比 httptest 上游）+ **vegeta** 做 1,000 req/s 持续负载（两侧 p50 对比；dev/test-only 工具，非运行时依赖） | v12.13.0 |
 | Go 版本 | go 1.26 线（go1.26.5，2026-07）；Go 1.27 若发布可直接升级，代码无需改动 | go1.26.5 |
 
-**依赖合计：4 个第三方库**（gobreaker、backoff、client_golang、yaml.v3），全部活跃维护、零传递依赖负担，符合宪法「成熟 + YAGNI」双约束。
+**依赖合计：4 个运行时第三方库依赖**（gobreaker、backoff、client_golang、yaml.v3；vegeta 与 mock-upstream 工具为 dev/test-only，非运行时依赖），全部活跃维护、零传递依赖负担，符合宪法「成熟 + YAGNI」双约束。
+
+> **ADR 要求**（宪法）：本节 JSON-RPC 手写薄层与库级选型决策须以 Architecture Decision Record 形式写入 `docs/adr/0002-jsonrpc-envelope-handwritten.md`（tasks 阶段实施）。
 
 **Sources**: go.dev/VERSION · go.dev/doc/devel/release · pkg.go.dev（prometheus/client_golang、sony/gobreaker/v2、cenkalti/backoff/v4、go-chi/chi/v5、gopkg.in/yaml.v3、go-ethereum/rpc、valyala/fasthttp、a8m/envsubst、tsenart/vegeta/v12）· prometheus.io/docs/practices/histograms/
 
@@ -61,7 +63,7 @@
 | -32001 | Upstream unavailable | 该链所有上游不可用/熔断全开 | 200 |
 | -32002 | Invalid upstream response | 上游返回非 JSON 或非法 JSON-RPC 响应 | 200 |
 | -32003 | Batch too large | 批量元素数超上限（默认 100） | 200 |
-| -32004 | Request body too large | 请求体超上限（默认 1 MB） | 200 |
+| -32004 | Request body too large | 请求体超上限（默认 1 MB） | 400（传输层拒绝，见 jsonrpc-api §5） |
 | -32005 | Upstream timeout | 上游超时且无可 failover 目标 | 200 |
 
 **Rationale**: 覆盖 spec 中所有网关特有失败场景（FR-002/FR-006/FR-019、Edge Cases），保持稳定契约便于客户端处理；-32603 internal error 保留给规范语义。
@@ -74,7 +76,7 @@
 
 **Rationale**: 与 spec 验收场景（US1 场景 1、US2 场景 1）一致；Base 覆盖 L2 场景，证明「加链 = 配置 + adapter」且 L2 无特殊路由逻辑。
 
-**Adapters**: `ethereum`（chain 1，参考实现）、`base`（chain 8453）。EIP-1898 块参数归一化（`{blockNumber: "0x..."}` → `"0x..."`、`"pending"`/`"latest"`/`"earliest"` 透传）在各 adapter 中实现；v1 中两个 adapter 行为一致，结构上验证「adapter 隔离」架构（SC-005）。
+**Adapters**: `ethereum`（chain 1，参考实现）、`base`（chain 8453）。EIP-1898 块参数归一化（`{blockNumber: "0x..."}` → `"0x..."`、`"pending"`/`"latest"`/`"earliest"` 透传）在各 adapter 中实现；v1 中两个 adapter 共享核心逻辑，但 `base` adapter 额外实现链特有行为——Base 节点特有错误码映射归一化——以非平凡地验证「adapter 隔离」架构（SC-005：新增链 = 配置 + adapter、零核心改动）。
 
 ### 2.4 重试策略参数（FR-010/FR-011）
 
