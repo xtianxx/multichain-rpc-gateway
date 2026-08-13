@@ -42,20 +42,20 @@
 
 ### 测试（先写，预期 FAIL）
 
-- [ ] T006 [P] 编写 config 包测试：YAML 解析、`${VAR}` 替换、未知字段拒绝、chain_id 校验、url scheme 校验、数值下限到 internal/config/config_test.go
-- [ ] T007 [P] 编写 jsonrpc 包测试：信封解析/校验（-32700/-32600）、id 逐字节回显、notification 检测、标准+网关错误码表到 internal/jsonrpc/envelope_test.go
-- [ ] T008 [P] 编写 chain 包测试：adapter 注册表、EIP-1898 块参数归一化、chain_id 规范化比较到 internal/chain/chain_test.go
-- [ ] T009 [P] 编写 logging 包测试：脱敏规则（私钥/地址/token/URL 凭证）到 internal/logging/logging_test.go
-- [ ] T010 [P] 编写 metrics 包测试：collector 定义与 label 维度（chain/upstream/method/outcome）到 internal/metrics/metrics_test.go
+- [X] T006 [P] 编写 config 包测试：YAML 解析、`${VAR}` 替换、未知字段拒绝、chain_id 校验、url scheme 校验、数值下限到 internal/config/config_test.go
+- [X] T007 [P] 编写 jsonrpc 包测试：信封解析/校验（-32700/-32600）、id 逐字节回显、notification 检测、标准+网关错误码表到 internal/jsonrpc/envelope_test.go
+- [X] T008 [P] 编写 chain 包测试：adapter 注册表、EIP-1898 块参数归一化、chain_id 规范化比较到 internal/chain/chain_test.go
+- [X] T009 [P] 编写 logging 包测试：脱敏规则（私钥/地址/token/URL 凭证）到 internal/logging/logging_test.go
+- [X] T010 [P] 编写 metrics 包测试：collector 定义与 label 维度（chain/upstream/method/outcome）到 internal/metrics/metrics_test.go
 
 ### 实现（使测试通过）
 
-- [ ] T011 [P] 实现 config 包：YAML 解析（KnownFields 严格模式）+ 手写 `${VAR}` 正则替换（yaml.Unmarshal 前、未设置 fail-fast）+ 启动期校验到 internal/config/config.go
-- [ ] T012 [P] 实现 jsonrpc 包：信封类型（json.RawMessage 保 id 逐字节）、解析/校验、错误码表（标准 -32700/-32600/-32601/-32602/-32603 + 网关 -32000~-32005）到 internal/jsonrpc/envelope.go 与 internal/jsonrpc/errors.go
-- [ ] T013 [P] 实现 chain 包：Chain/Upstream 结构、Adapter 接口 + 注册表、ethereum 与 base adapter（EIP-1898 请求归一化、响应整形、原生币处理）到 internal/chain/chain.go、internal/chain/ethereum.go、internal/chain/base.go
-- [ ] T014 [P] 实现 logging 包：slog JSON handler 装配 + 白名单/ReplaceAttr 双重脱敏到 internal/logging/logging.go
-- [ ] T015 [P] 实现 metrics 包：gateway_requests_total（Counter）、gateway_request_duration_seconds（Histogram，低段加密桶 [0.0001...10]）、gateway_requests_inflight（Gauge，chain/upstream）、gateway_upstream_up（Gauge：0=unhealthy / 1=healthy / 2=unknown）/ probe_latency / circuit_state（Gauge）注册到 internal/metrics/metrics.go；gateway_request_duration_seconds 的 method label 若基数失控收敛为 chain+upstream 两维（metrics-contract §2）
-- [ ] T016 全量验证：`go build ./...` + `go test ./...` 全绿，`go vet ./...` 无告警
+- [X] T011 [P] 实现 config 包：YAML 解析（KnownFields 严格模式）+ 手写 `${VAR}` 正则替换（yaml.Unmarshal 前、未设置 fail-fast）+ 启动期校验到 internal/config/config.go
+- [X] T012 [P] 实现 jsonrpc 包：信封类型（json.RawMessage 保 id 逐字节）、解析/校验、错误码表（标准 -32700/-32600/-32601/-32602/-32603 + 网关 -32000~-32005）到 internal/jsonrpc/envelope.go 与 internal/jsonrpc/errors.go
+- [X] T013 [P] 实现 chain 包：Chain/Upstream 结构、Adapter 接口 + 注册表、ethereum 与 base adapter（EIP-1898 请求归一化、响应整形、原生币处理）到 internal/chain/chain.go、internal/chain/ethereum.go、internal/chain/base.go
+- [X] T014 [P] 实现 logging 包：slog JSON handler 装配 + 白名单/ReplaceAttr 双重脱敏到 internal/logging/logging.go
+- [X] T015 [P] 实现 metrics 包：gateway_requests_total（Counter）、gateway_request_duration_seconds（Histogram，低段加密桶 [0.0001...10]）、gateway_requests_inflight（Gauge，chain/upstream）、gateway_upstream_up（Gauge：0=unhealthy / 1=healthy / 2=unknown）/ probe_latency / circuit_state（Gauge）注册到 internal/metrics/metrics.go；gateway_request_duration_seconds 的 method label 若基数失控收敛为 chain+upstream 两维（metrics-contract §2）
+- [X] T016 全量验证：`go build ./...` + `go test ./...` 全绿，`go vet ./...` 无告警
 
 **Checkpoint**: 基础层就绪 —— 用户故事可并行开始
 
@@ -69,15 +69,15 @@
 
 ### Tests for User Story 1（TDD，先写，预期 FAIL）
 
-- [ ] T017 [P] [US1] 编写 router 单测：X-Chain-Id 解析、未知链 -32000、单上游选择、RoutingRecord 构建到 internal/router/router_test.go
-- [ ] T018 [P] [US1] 编写集成测试：双 mock 上游进程内端到端路由（httptest）到 tests/integration/routing_test.go
+- [X] T017 [P] [US1] 编写 router 单测：X-Chain-Id 解析、未知链 -32000、单上游选择、RoutingRecord 构建到 internal/router/router_test.go
+- [X] T018 [P] [US1] 编写集成测试：双 mock 上游进程内端到端路由（httptest）到 tests/integration/routing_test.go
 
 ### Implementation for User Story 1
 
-- [ ] T019 [P] [US1] 实现 upstream 转发客户端：每上游独立 http.Client + Transport 连接池、按方法类 context.WithTimeout、响应校验（合法 JSON-RPC 且 id 匹配，否则 -32002）到 internal/upstream/client.go
-- [ ] T020 [P] [US1] 实现 router：链解析（头 → chain_id 规范形）、上游选择（v1 基础：取第一个可用）、RoutingRecord（chain/method/upstream/outcome/latency）到 internal/router/router.go
-- [ ] T021 [US1] 实现 cmd/gateway/main.go：flag 解析、config 加载、slog/Prometheus 装配、HTTP handler（POST /：单请求 → router → upstream → 响应回显；`eth_subscribe` 网关侧拒绝返回 -32601，v1 无 WebSocket）、优雅停机
-- [ ] T022 [US1] 补齐 US1 错误路径：未知链 -32000（含 data 上下文 `{"chain_id":...}`）、-32002 无效上游响应；保证畸形请求先拒后转（FR-016）
+- [X] T019 [P] [US1] 实现 upstream 转发客户端：每上游独立 http.Client + Transport 连接池、按方法类 context.WithTimeout、响应校验（合法 JSON-RPC 且 id 匹配，否则 -32002）到 internal/upstream/client.go
+- [X] T020 [P] [US1] 实现 router：链解析（头 → chain_id 规范形）、上游选择（v1 基础：取第一个可用）、RoutingRecord（chain/method/upstream/outcome/latency）到 internal/router/router.go
+- [X] T021 [US1] 实现 cmd/gateway/main.go：flag 解析、config 加载、slog/Prometheus 装配、HTTP handler（POST /：单请求 → router → upstream → 响应回显；`eth_subscribe` 网关侧拒绝返回 -32601，v1 无 WebSocket）、优雅停机
+- [X] T022 [US1] 补齐 US1 错误路径：未知链 -32000（含 data 上下文 `{"chain_id":...}`）、-32002 无效上游响应；保证畸形请求先拒后转（FR-016）
 
 **Checkpoint**: User Story 1 独立可测 —— 双 mock 上游路由正确、-32000 不转发
 
