@@ -14,7 +14,8 @@ MOCKUP   := $(BIN_DIR)/mockupstream
 LOAD_RATE         ?= 1000
 LOAD_DURATION     ?= 60s
 LOAD_GATEWAY_URL  ?= http://localhost:8545
-LOAD_DIRECT_URL   ?= http://localhost:19545  # mock upstream port used by scripts/demo.sh
+# mock upstream port used by scripts/demo.sh
+LOAD_DIRECT_URL   ?= http://localhost:19545
 
 .PHONY: demo demo-failover test test-conformance lint bench load clean
 
@@ -39,19 +40,21 @@ lint:
 	$(GO) vet ./...
 	gofmt -l .
 
-## bench: in-process passthrough overhead benchmark (direct vs gateway)
+## bench: in-process passthrough overhead benchmark (raw passthrough baseline vs gateway)
 bench:
 	$(GO) test -bench . -benchtime=10s -count=5 ./bench/
 
-## load: sustained load via vegeta — gateway round + direct baseline round
+## load: sustained load via vegeta — gateway round + baseline round
+# vegeta's HTTP targeter (v12) does not support inline bodies; the request
+# body is supplied via -body from scripts/load-body.json.
 load: $(GATEWAY)
 	@echo "== load: via gateway ($(LOAD_GATEWAY_URL)) =="
-	@printf 'POST %s\nContent-Type: application/json\nX-Chain-Id: 1\n\n{"jsonrpc":"2.0","method":"eth_chainId","params":[],"id":1}\n' '$(LOAD_GATEWAY_URL)' | \
-		vegeta attack -rate=$(LOAD_RATE) -duration=$(LOAD_DURATION) -output=/tmp/gateway-load.bin
+	@printf 'POST %s\nContent-Type: application/json\nX-Chain-Id: 1\n' '$(LOAD_GATEWAY_URL)' | \
+		vegeta attack -rate=$(LOAD_RATE) -duration=$(LOAD_DURATION) -body=scripts/load-body.json -output=/tmp/gateway-load.bin
 	@vegeta report -type=text /tmp/gateway-load.bin
-	@echo "== load: direct to upstream ($(LOAD_DIRECT_URL)) =="
-	@printf 'POST %s\nContent-Type: application/json\n\n{"jsonrpc":"2.0","method":"eth_chainId","params":[],"id":1}\n' '$(LOAD_DIRECT_URL)' | \
-		vegeta attack -rate=$(LOAD_RATE) -duration=$(LOAD_DURATION) -output=/tmp/direct-load.bin
+	@echo "== load: baseline to upstream ($(LOAD_DIRECT_URL)) =="
+	@printf 'POST %s\nContent-Type: application/json\n' '$(LOAD_DIRECT_URL)' | \
+		vegeta attack -rate=$(LOAD_RATE) -duration=$(LOAD_DURATION) -body=scripts/load-body.json -output=/tmp/direct-load.bin
 	@vegeta report -type=text /tmp/direct-load.bin
 
 ## clean: remove build artifacts

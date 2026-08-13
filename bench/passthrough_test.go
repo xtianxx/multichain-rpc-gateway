@@ -1,21 +1,24 @@
 // Package bench holds the in-process passthrough overhead benchmarks (T043,
-// US4 observability). They quantify the gateway's added latency over a direct
+// US4 observability). They quantify the gateway's added latency over an
 // upstream call — the SC-002 passthrough budget defined in
-// specs/001-multichain-rpc-routing/quickstart.md §4: BenchmarkDirect vs
+// specs/001-multichain-rpc-routing/quickstart.md §4: BenchmarkPassthrough vs
 // BenchmarkGateway ns/op, gateway increment = the difference, and the gateway
-// p50 must stay within direct +20%.
+// p50 must stay within the baseline +20%.
 //
 // Fairness argument: both benchmarks measure one complete loopback HTTP
 // round trip through the same mock upstream (full net/http path, real
-// sockets, real TCP). BenchmarkGateway adds exactly one more hop — through
-// the gateway's own httptest server — plus the production pipeline between
-// the hops: body parsing (internal/jsonrpc), chain resolution
-// (internal/router), envelope rebuild, upstream forward with pooled client,
-// response validation and shaping, per-request slog record at info level
-// (internal/logging, redaction included), and Prometheus recording overhead
-// (internal/metrics, registered on a real registry). The difference between
-// the two numbers is therefore precisely the gateway's incremental cost for
-// one passthrough request.
+// sockets, real TCP) with an identical transport shape: bench client →
+// server → mock upstream, i.e. two TCP hops in both cases. The baseline
+// server is a raw passthrough forwarder that does byte-forwarding only — no
+// JSON-RPC parsing, no chain resolution, no logging, no metrics. The gateway
+// runs the production pipeline between the same two hops: body parsing
+// (internal/jsonrpc), chain resolution (internal/router), envelope rebuild,
+// upstream forward with pooled client, response validation and shaping,
+// per-request slog record at info level (internal/logging, redaction
+// included), and Prometheus recording overhead (internal/metrics, registered
+// on a real registry). The difference between the two numbers is therefore
+// precisely the gateway's incremental processing cost for one passthrough
+// request, excluding upstream latency (FR-017).
 package bench
 
 import (
@@ -37,6 +40,7 @@ import (
 	"github.com/xtianxx/multichain-rpc-gateway/internal/logging"
 	"github.com/xtianxx/multichain-rpc-gateway/internal/metrics"
 	"github.com/xtianxx/multichain-rpc-gateway/internal/router"
+	"github.com/xtianxx/multichain-rpc-gateway/internal/upstream"
 )
 
 // passthroughBody is the fixed single-request payload both benchmarks POST.
@@ -49,21 +53,31 @@ const passthroughBody = `{"jsonrpc":"2.0","method":"eth_chainId","params":[],"id
 // own pooled per-upstream client (upstream.NewHTTPClient), as in production.
 var benchClient *http.Client
 
-// setup builds the full benchmark fixture and returns the direct upstream
-// URL, the gateway URL, and a cleanup function:
+// forwardClient is the pooled client the baseline forwarder uses to reach
+// the mock upstream — the exact production transport (upstream.NewHTTPClient),
+// so the baseline carries the same connection-pool behavior as the gateway's
+// upstream hops.
+var forwardClient = upstream.NewHTTPClient()
+
+// setup builds the full benchmark fixture and returns the baseline (raw
+// passthrough forwarder) URL, the gateway URL, and a cleanup function:
 //
 //   - mock upstream: httptest server echoing the request id byte-for-byte in
 //     a minimal {"jsonrpc":"2.0","id":<id>,"result":"0x1"} response, matching
 //     the shape jsonrpc.ValidUpstreamResponse requires
+//   - baseline forwarder: httptest server that byte-forwards the request
+//     body to the mock upstream with zero pipeline work (no JSON-RPC
+//     parsing, no chain resolution, no logging, no metrics), giving both
+//     benchmarks the identical two-hop transport shape
 //   - metrics: metrics.Register on a fresh prometheus registry, so the
 //     gateway benchmark includes the production metric recording cost
 //   - logger: production-style JSON slog logger at info level writing to
 //     io.Discard (redaction runs on every record, exactly like production)
 //   - config: built programmatically — no config.Load, no env vars; the
 //     circuit breaker is wired (FailThreshold 5) like production
-//   - gateway: router.New + api.New behind a second httptest server, the
+//   - gateway: router.New + api.New behind a third httptest server, the
 //     full HTTP path including the X-Chain-Id resolution step
-func setup() (directURL, gatewayURL string, cleanup func()) {
+func setup() (baselineURL, gatewayURL string, cleanup func()) {
 	// Mock upstream: minimal passthrough responder. It only needs to echo
 	// the id member; the result value is fixed.
 	upstreamSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -86,6 +100,35 @@ func setup() (directURL, gatewayURL string, cleanup func()) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		_, _ = fmt.Fprintf(w, `{"jsonrpc":"2.0","id":%s,"result":"0x1"}`, id)
+	}))
+
+	// Raw passthrough forwarder: the two-hop transport shape (bench client →
+	// server → mock upstream) is identical to the gateway path, but there is
+	// zero pipeline work — no JSON-RPC parsing, no chain resolution, no
+	// logging, no metrics. It byte-forwards the body with the same pooled
+	// transport the gateway uses (upstream.NewHTTPClient), so the difference
+	// between the two benchmarks is exactly the gateway's processing cost,
+	// excluding upstream latency (FR-017).
+	forwardSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		fwdReq, err := http.NewRequestWithContext(r.Context(), http.MethodPost, upstreamSrv.URL, bytes.NewReader(body))
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		fwdReq.Header.Set("Content-Type", "application/json")
+		resp, err := forwardClient.Do(fwdReq)
+		if err != nil {
+			w.WriteHeader(http.StatusBadGateway)
+			return
+		}
+		defer resp.Body.Close()
+		w.WriteHeader(resp.StatusCode)
+		_, _ = io.Copy(w, resp.Body)
 	}))
 
 	// Production recording overhead: the metrics collectors are package-level
@@ -114,14 +157,16 @@ func setup() (directURL, gatewayURL string, cleanup func()) {
 	rt, err := router.New(cfg, logger)
 	if err != nil {
 		upstreamSrv.Close()
+		forwardSrv.Close()
 		panic(fmt.Sprintf("bench setup: router.New: %v", err))
 	}
 	handler := api.New(rt, 1<<20, 100, logger)
 	gatewaySrv := httptest.NewServer(handler)
 
 	benchClient = &http.Client{} // plain client, created once per setup
-	return upstreamSrv.URL, gatewaySrv.URL, func() {
+	return forwardSrv.URL, gatewaySrv.URL, func() {
 		gatewaySrv.Close()
+		forwardSrv.Close()
 		upstreamSrv.Close()
 	}
 }
@@ -177,11 +222,14 @@ func reportP50(b *testing.B, durations []time.Duration) {
 	b.ReportMetric(float64(median.Nanoseconds()), "p50_ns/op")
 }
 
-// BenchmarkDirect measures the baseline: one loopback HTTP round trip from
-// the bench process straight to the mock upstream. The wall-clock round trip
-// is the measurement — no StopTimer/StartTimer wrapping.
-func BenchmarkDirect(b *testing.B) {
-	directURL, _, cleanup := setup()
+// BenchmarkPassthrough measures the baseline: one HTTP round trip from the
+// bench process through the raw passthrough forwarder to the mock upstream.
+// Both TCP hops and the pooled forward transport are identical to the
+// gateway path; only the gateway's processing pipeline is absent. The
+// wall-clock round trip is the measurement — no StopTimer/StartTimer
+// wrapping.
+func BenchmarkPassthrough(b *testing.B) {
+	baselineURL, _, cleanup := setup()
 	defer cleanup()
 
 	body := []byte(passthroughBody)
@@ -189,17 +237,19 @@ func BenchmarkDirect(b *testing.B) {
 
 	durations := make([]time.Duration, 0, b.N)
 	for i := 0; i < b.N; i++ {
-		durations = append(durations, postOnce(b, directURL, body, nil))
+		durations = append(durations, postOnce(b, baselineURL, body, nil))
 	}
 	reportP50(b, durations)
 }
 
 // BenchmarkGateway measures the same request through the full gateway
 // pipeline: bench -> gateway httptest server -> router (resolution,
-// envelope rebuild, retry/failover logic) -> mock upstream -> back. One
-// extra loopback hop plus the routing/envelope/metrics/logging overhead on
-// top of BenchmarkDirect — that difference is the SC-002 passthrough
-// budget.
+// envelope rebuild, retry/failover logic) -> mock upstream -> back. The
+// transport shape is identical to BenchmarkPassthrough (same two hops, same
+// pooled upstream transport); the difference between the two p50s is
+// precisely the gateway's incremental processing cost — the SC-002
+// passthrough budget (FR-017: gateway-added latency excluding upstream
+// latency).
 func BenchmarkGateway(b *testing.B) {
 	_, gatewayURL, cleanup := setup()
 	defer cleanup()

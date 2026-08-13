@@ -33,7 +33,11 @@ die() {
 }
 
 cleanup() {
-  trap - INT TERM EXIT
+  # Ignore further INT/TERM while tearing down (a second Ctrl-C must not
+  # kill us mid-cleanup and leak the temp dir), and drop the EXIT trap so
+  # the cleanup does not run twice on normal exit.
+  trap '' INT TERM
+  trap - EXIT
   # Stop the gateway first, then the mocks.
   for pid in "$GATEWAY_PID" "$PRIMARY_PID" "$SECONDARY_PID"; do
     if [ -n "${pid:-}" ]; then

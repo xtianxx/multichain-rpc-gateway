@@ -5,9 +5,9 @@
 #   2. go vet ./...
 #   3. unit + in-process integration tests (make test equivalent)
 #   4. JSON-RPC 2.0 conformance vectors (make test-conformance equivalent)
-#   5. FR-017 benchmark gate: passthrough p50 overhead (gateway vs direct
-#      baseline) must stay within +20%; a regression above 20% fails the
-#      build and requires written justification.
+#   5. FR-017 benchmark gate: passthrough p50 overhead (gateway vs raw
+#      passthrough baseline) must stay within +20%; a regression above 20%
+#      fails the build and requires written justification.
 #
 # No secrets are used; the workflow only reads the repository.
 
@@ -47,10 +47,12 @@ jobs:
         run: go test -run TestConformance ./tests/conformance/
 
       # FR-017 / SC-002 gate: the gateway's p50 must stay within +20% of the
-      # direct-upstream baseline. The bench is self-baselined: BenchmarkDirect
-      # and BenchmarkGateway run in the same process on the same runner, so
-      # machine noise cancels out. -benchtime=3s -count=3 with a median over
-      # the 3 runs keeps the gate stable without GOMAXPROCS tricks.
+      # raw-passthrough baseline. The bench is self-baselined:
+      # BenchmarkPassthrough (raw byte-forwarder, same two-hop transport
+      # shape) and BenchmarkGateway run in the same process on the same
+      # runner, so machine noise cancels out. -benchtime=3s -count=3 with a
+      # median over the 3 runs keeps the gate stable without GOMAXPROCS
+      # tricks.
       - name: Benchmark p50 gate (FR-017)
         shell: bash
         run: |
@@ -68,25 +70,25 @@ jobs:
 
           # Collect the 3 p50_ns/op values per benchmark and take the median
           # (middle of the sorted values).
-          direct_p50=$(printf '%s\n' "$out" \
-            | awk '/^BenchmarkDirect/  { for (i = 1; i <= NF; i++) if ($i == "p50_ns/op") print $(i-1) }' \
+          baseline_p50=$(printf '%s\n' "$out" \
+            | awk '/^BenchmarkPassthrough/ { for (i = 1; i <= NF; i++) if ($i == "p50_ns/op") print $(i-1) }' \
             | sort -n | awk 'NR == 2 { print; exit }')
           gateway_p50=$(printf '%s\n' "$out" \
             | awk '/^BenchmarkGateway/ { for (i = 1; i <= NF; i++) if ($i == "p50_ns/op") print $(i-1) }' \
             | sort -n | awk 'NR == 2 { print; exit }')
 
-          if [ -z "$direct_p50" ] || [ -z "$gateway_p50" ]; then
+          if [ -z "$baseline_p50" ] || [ -z "$gateway_p50" ]; then
             echo "FR-017 gate: could not extract p50_ns/op values from benchmark output:"
             printf '%s\n' "$out"
             exit 1
           fi
 
-          # overhead% = 100 * (gateway_p50 - direct_p50) / direct_p50
-          overhead_pct=$(awk -v gw="$gateway_p50" -v d="$direct_p50" 'BEGIN { printf "%.2f", 100 * (gw - d) / d }')
-          echo "FR-017 p50 gate: direct=${direct_p50}ns/op gateway=${gateway_p50}ns/op overhead=${overhead_pct}% (limit 20%)"
+          # overhead% = 100 * (gateway_p50 - baseline_p50) / baseline_p50
+          overhead_pct=$(awk -v gw="$gateway_p50" -v b="$baseline_p50" 'BEGIN { printf "%.2f", 100 * (gw - b) / b }')
+          echo "FR-017 p50 gate: baseline=${baseline_p50}ns/op gateway=${gateway_p50}ns/op overhead=${overhead_pct}% (limit 20%)"
 
-          if awk -v gw="$gateway_p50" -v d="$direct_p50" 'BEGIN { exit (100 * (gw - d) / d > 20) ? 0 : 1 }'; then
-            echo "::error::FR-017 gate FAILED: p50 overhead ${overhead_pct}% exceeds 20% over the direct baseline (direct=${direct_p50}ns/op, gateway=${gateway_p50}ns/op); a merge degrading p50 overhead by more than 20% requires written justification."
+          if awk -v gw="$gateway_p50" -v b="$baseline_p50" 'BEGIN { exit (100 * (gw - b) / b > 20) ? 0 : 1 }'; then
+            echo "::error::FR-017 gate FAILED: p50 overhead ${overhead_pct}% exceeds 20% over the raw passthrough baseline (baseline=${baseline_p50}ns/op, gateway=${gateway_p50}ns/op); a merge degrading p50 overhead by more than 20% requires written justification."
             exit 1
           fi
           echo "FR-017 p50 gate: PASS"
