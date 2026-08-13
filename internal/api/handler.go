@@ -15,8 +15,10 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strconv"
 
 	"github.com/xtianxx/multichain-rpc-gateway/internal/jsonrpc"
+	"github.com/xtianxx/multichain-rpc-gateway/internal/metrics"
 	"github.com/xtianxx/multichain-rpc-gateway/internal/router"
 )
 
@@ -49,9 +51,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		var maxErr *http.MaxBytesError
 		if errors.As(err, &maxErr) {
+			metrics.RecordRequest("-", "-", "-", "-32004")
 			h.writeError(w, http.StatusBadRequest, nil, jsonrpc.CodeBodyTooLarge, nil)
 			return
 		}
+		metrics.RecordRequest("-", "-", "-", "-32603")
 		h.writeError(w, http.StatusInternalServerError, nil, jsonrpc.CodeInternalError, nil)
 		return
 	}
@@ -67,6 +71,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	req, jrErr := jsonrpc.ParseSingle(body)
 	if jrErr != nil {
+		metrics.RecordRequest("-", "-", "-", strconv.Itoa(jrErr.Code))
 		status := http.StatusOK
 		if jrErr.Code == jsonrpc.CodeParseError {
 			status = http.StatusBadRequest
@@ -79,6 +84,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	notification := jsonrpc.IsNotification(req)
 
 	if req.Method == "eth_subscribe" {
+		metrics.RecordRequest("-", "-", "eth_subscribe", "-32601")
 		if notification {
 			w.WriteHeader(http.StatusOK)
 			return
@@ -90,6 +96,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	ch, jrErr := h.router.ResolveChain(r.Header.Get("X-Chain-Id"))
 	if jrErr != nil {
+		// Counted before the notification swallow check so swallowed
+		// notifications still show up in metrics.
+		metrics.RecordRequest("-", "-", req.Method, strconv.Itoa(jrErr.Code))
 		if notification {
 			w.WriteHeader(http.StatusOK)
 			return
@@ -121,6 +130,7 @@ func (h *Handler) writeError(w http.ResponseWriter, status int, id json.RawMessa
 func (h *Handler) serveBatch(w http.ResponseWriter, r *http.Request, body []byte) {
 	els, batchErr := jsonrpc.ParseBatch(body)
 	if batchErr != nil {
+		metrics.RecordRequest("-", "-", "batch", strconv.Itoa(batchErr.Code))
 		status := http.StatusOK
 		if batchErr.Code == jsonrpc.CodeParseError {
 			status = http.StatusBadRequest
@@ -130,6 +140,7 @@ func (h *Handler) serveBatch(w http.ResponseWriter, r *http.Request, body []byte
 	}
 	if len(els) > h.maxBatchElements {
 		// Limit check precedes any per-element work: nothing is forwarded.
+		metrics.RecordRequest("-", "-", "batch", "-32003")
 		h.writeError(w, http.StatusOK, nil, jsonrpc.CodeBatchTooLarge, nil)
 		return
 	}
@@ -140,24 +151,30 @@ func (h *Handler) serveBatch(w http.ResponseWriter, r *http.Request, body []byte
 		switch {
 		case el.Err != nil:
 			// Invalid element: error response with id null, sibling isolated.
+			metrics.RecordRequest("-", "-", "-", strconv.Itoa(el.Err.Code))
 			responses = append(responses, jsonrpc.NewErrorResponse(nil, el.Err.Code, el.Err.Data))
 		case el.Request.Method == "eth_subscribe":
 			// No WebSocket support: never forward, notification or not.
 			// A subscribe notification is swallowed without a response
 			// element, mirroring the single-request path.
+			metrics.RecordRequest("-", "-", "eth_subscribe", "-32601")
 			if !jsonrpc.IsNotification(el.Request) {
 				responses = append(responses, jsonrpc.NewErrorResponse(el.Request.ID, jsonrpc.CodeMethodNotFound,
 					map[string]any{"method": "eth_subscribe"}))
 			}
 		case jsonrpc.IsNotification(el.Request):
 			// Notifications never produce a response element; resolution
-			// and routing errors are swallowed.
-			if ch, jrErr := h.router.ResolveChainForElement(el.ChainOverride, headerChain); jrErr == nil {
+			// and routing errors are swallowed (but still counted).
+			ch, jrErr := h.router.ResolveChainForElement(el.ChainOverride, headerChain)
+			if jrErr != nil {
+				metrics.RecordRequest("-", "-", el.Request.Method, strconv.Itoa(jrErr.Code))
+			} else {
 				_, _, _ = h.router.Route(r.Context(), ch, el.Request)
 			}
 		default:
 			ch, jrErr := h.router.ResolveChainForElement(el.ChainOverride, headerChain)
 			if jrErr != nil {
+				metrics.RecordRequest("-", "-", el.Request.Method, strconv.Itoa(jrErr.Code))
 				responses = append(responses, jsonrpc.NewErrorResponse(el.Request.ID, jrErr.Code, jrErr.Data))
 				continue
 			}

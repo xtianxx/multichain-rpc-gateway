@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"github.com/xtianxx/multichain-rpc-gateway/internal/api"
@@ -54,7 +55,14 @@ func main() {
 		os.Exit(1)
 	}
 
-	metrics.Register(prometheus.DefaultRegisterer)
+	// Explicit registry wired with the standard go/process collectors, per
+	// the metrics contract; the gateway collectors register on top.
+	reg := prometheus.NewRegistry()
+	reg.MustRegister(
+		collectors.NewGoCollector(),
+		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
+	)
+	metrics.Register(reg)
 
 	rt, err := router.New(cfg, logger)
 	if err != nil {
@@ -73,7 +81,7 @@ func main() {
 	}
 
 	metricsMux := http.NewServeMux()
-	metricsMux.Handle("/metrics", promhttp.Handler())
+	metricsMux.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
 	metricsMux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = io.WriteString(w, "ok\n")

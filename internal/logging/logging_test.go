@@ -74,6 +74,53 @@ func TestRedactLeavesSafeText(t *testing.T) {
 	}
 }
 
+func TestRedactRawTransactionPayload(t *testing.T) {
+	// A raw tx is a 0x-prefixed hex run longer than any key or address:
+	// 200 hex chars here. The whole run must vanish in one replacement.
+	rawTx := "0x" + strings.Repeat("ab", 100)
+	out := Redact(`{"jsonrpc":"2.0","method":"eth_sendRawTransaction","params":["` + rawTx + `"],"id":1}`)
+	if strings.Contains(out, "abab") {
+		t.Errorf("raw tx hex leaked: %q", out)
+	}
+	if !strings.Contains(out, "0x[REDACTED]") {
+		t.Errorf("expected redaction marker: %q", out)
+	}
+}
+
+func TestRedactLeavesShortHex(t *testing.T) {
+	// Six hex chars are below the 8-char threshold and must pass through:
+	// documents the boundary between benign short hex and sensitive runs.
+	in := `{"data":"0x1a2b3c"}`
+	if out := Redact(in); out != in {
+		t.Errorf("short hex must pass through unchanged: %q", out)
+	}
+}
+
+func TestLogRecordRedactsEthSendRawTransactionPayload(t *testing.T) {
+	// Defense-in-depth: a full eth_sendRawTransaction payload carrying both
+	// a raw tx and a private key must never land in the log (constitution V).
+	var buf bytes.Buffer
+	logger := NewWithOutput(&buf, slog.LevelDebug)
+	rawTx := "0x" + strings.Repeat("cd", 100)
+	payload := `{"jsonrpc":"2.0","method":"eth_sendRawTransaction","params":["` + rawTx + `","` + privateKey + `"],"id":1}`
+	logger.Info("request", "payload", payload)
+
+	var rec map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &rec); err != nil {
+		t.Fatalf("logger output is not valid JSON: %v (%q)", err, buf.String())
+	}
+	out, _ := rec["payload"].(string)
+	if strings.Contains(out, "cdcd") {
+		t.Errorf("raw tx hex leaked into JSON log: %q", out)
+	}
+	if strings.Contains(out, privateKey[10:]) {
+		t.Errorf("private key leaked into JSON log: %q", out)
+	}
+	if !strings.Contains(out, "[REDACTED]") {
+		t.Errorf("expected redaction marker: %q", out)
+	}
+}
+
 func TestNewWithOutputRedactsRecords(t *testing.T) {
 	var buf bytes.Buffer
 	logger := NewWithOutput(&buf, slog.LevelDebug)

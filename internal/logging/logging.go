@@ -1,5 +1,8 @@
 // Package logging provides the gateway's JSON slog logger with double
 // redaction (constitution V: payloads and secrets must never reach logs).
+// Redact covers 0x-prefixed hex runs of 8+ chars (addresses, private keys,
+// raw transaction payloads), bearer tokens, token= assignments, and URL
+// userinfo credentials.
 package logging
 
 import (
@@ -10,9 +13,10 @@ import (
 )
 
 var (
-	// Longest-first alternation: a 64-hex private key contains a 40-hex
-	// address prefix, so the 64-char pattern must be tried first.
-	hexRe      = regexp.MustCompile(`0x[0-9a-fA-F]{64}|0x[0-9a-fA-F]{40}`)
+	// Single greedy run: matches the full 0x-prefixed hex run (8+ chars) in
+	// one replacement. An alternation would be wrong here — leftmost-first
+	// matching would cut a 100-hex raw tx at 64 chars and leak the tail.
+	hexRe      = regexp.MustCompile(`0x[0-9a-fA-F]{8,}`)
 	bearerRe   = regexp.MustCompile(`(?i)\bBearer[ \t]+[A-Za-z0-9._~+/=-]+`)
 	tokenRe    = regexp.MustCompile(`(?i)\b(token=)[^&\s]+`)
 	userinfoRe = regexp.MustCompile(`([a-zA-Z][a-zA-Z0-9+.-]*://)[^/\s@]+@`)
@@ -48,7 +52,9 @@ func redactAttr(_ []string, a slog.Attr) slog.Attr {
 }
 
 // Redact scrubs sensitive material from any string:
-//   - hex private keys (0x + 64 hex chars) and addresses (0x + 40 hex chars)
+//   - 0x-prefixed hex runs of 8+ chars: addresses (40), private keys (64),
+//     and longer raw transaction payloads (eth_sendRawTransaction); short
+//     0x values below 8 hex chars pass through
 //   - bearer tokens
 //   - token=<value> query-style assignments
 //   - URL userinfo credentials (scheme://user:pass@host)

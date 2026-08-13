@@ -1,6 +1,7 @@
 package router
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/xtianxx/multichain-rpc-gateway/internal/config"
 	"github.com/xtianxx/multichain-rpc-gateway/internal/jsonrpc"
+	"github.com/xtianxx/multichain-rpc-gateway/internal/logging"
 )
 
 func discardLogger() *slog.Logger {
@@ -134,6 +136,62 @@ func newMockUpstream(t *testing.T, reply func(method string, id json.RawMessage)
 	}))
 	t.Cleanup(m.server.Close)
 	return m
+}
+
+func TestRouteLogsStructuredRecordWithoutPayload(t *testing.T) {
+	// T042 (US4): every Route call emits one structured log record with
+	// routing metadata only — the request payload must never reach the log.
+	mock := newMockUpstream(t, func(method string, id json.RawMessage) (int, []byte) {
+		return 200, []byte(fmt.Sprintf(`{"jsonrpc":"2.0","result":"0x1","id":%s}`, id))
+	})
+	cfg := testConfig([]config.Chain{{
+		ChainID: "1", Adapter: "ethereum",
+		Upstreams: []config.Upstream{{Name: "mainnet-a", URL: mock.server.URL}},
+	}}, nil)
+
+	var buf bytes.Buffer
+	r, err := New(cfg, logging.NewWithOutput(&buf, slog.LevelDebug))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	ch, _ := r.ResolveChain("1")
+
+	req, jrErr := jsonrpc.ParseSingle([]byte(`{"jsonrpc":"2.0","method":"eth_getBalance","params":["0x52908400098527886e0f7030069857d2e4169ee7","latest"],"id":7}`))
+	if jrErr != nil {
+		t.Fatalf("ParseSingle: %v", jrErr)
+	}
+	if _, jrErr, _ := r.Route(context.Background(), ch, req); jrErr != nil {
+		t.Fatalf("Route: %v", jrErr)
+	}
+
+	var rec map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &rec); err != nil {
+		t.Fatalf("log line is not valid JSON: %v (%s)", err, buf.String())
+	}
+	if rec["msg"] != "request" {
+		t.Errorf("msg: got %v want %q", rec["msg"], "request")
+	}
+	if rec["chain_id"] != "1" {
+		t.Errorf("chain_id: got %v", rec["chain_id"])
+	}
+	if rec["method"] != "eth_getBalance" {
+		t.Errorf("method: got %v", rec["method"])
+	}
+	if rec["upstream"] != "mainnet-a" {
+		t.Errorf("upstream: got %v", rec["upstream"])
+	}
+	if rec["outcome"] != "success" {
+		t.Errorf("outcome: got %v", rec["outcome"])
+	}
+	if lat, ok := rec["latency"].(string); !ok || lat == "" {
+		t.Errorf("latency: got %v", rec["latency"])
+	}
+	if _, ok := rec["retries"]; !ok {
+		t.Error("retries field missing from log record")
+	}
+	if strings.Contains(buf.String(), "52908400098527886e0f7030069857d2e4169ee7") {
+		t.Error("payload address must never appear in the log record")
+	}
 }
 
 func TestRouteSelectsSingleUpstreamAndBuildsRecord(t *testing.T) {

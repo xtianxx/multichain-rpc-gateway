@@ -20,6 +20,7 @@ import (
 	"github.com/xtianxx/multichain-rpc-gateway/internal/chain"
 	"github.com/xtianxx/multichain-rpc-gateway/internal/config"
 	"github.com/xtianxx/multichain-rpc-gateway/internal/jsonrpc"
+	"github.com/xtianxx/multichain-rpc-gateway/internal/metrics"
 	"github.com/xtianxx/multichain-rpc-gateway/internal/upstream"
 )
 
@@ -76,6 +77,12 @@ func New(cfg *config.Config, logger *slog.Logger) (*Router, error) {
 			return nil, fmt.Errorf("chains[%d] %q: %w", i, cc.ChainID, err)
 		}
 		r.chains[ch.ChainID] = ch
+		// Initial health/circuit gauge series (metrics contract): upstreams
+		// start unknown (2) with a closed breaker (0) until probes run.
+		for _, u := range ups {
+			metrics.SetUpstreamUp(ch.ChainID, u.Name, metrics.UpstreamUpUnknown)
+			metrics.SetUpstreamCircuitState(ch.ChainID, u.Name, metrics.CircuitClosed)
+		}
 	}
 	return r, nil
 }
@@ -115,6 +122,14 @@ func (r *Router) Route(ctx context.Context, ch *chain.Chain, req *jsonrpc.Reques
 	start := time.Now()
 	defer func() {
 		rec.Latency = time.Since(start)
+		// Metrics are recorded exactly once per Route call, covering every
+		// routed request including batch elements and notifications (US4).
+		up := rec.Upstream
+		if up == "" {
+			up = "-"
+		}
+		metrics.RecordRequest(rec.ChainID, up, rec.Method, rec.Outcome)
+		metrics.RecordRequestLatency(rec.ChainID, up, rec.Method, rec.Latency)
 		r.logRecord(rec)
 	}()
 
@@ -158,6 +173,16 @@ func (r *Router) Route(ctx context.Context, ch *chain.Chain, req *jsonrpc.Reques
 		rec.Outcome = strconv.Itoa(jrErr.Code)
 		return nil, jrErr, rec
 	}
+
+	// Track the in-flight gauge against the preferred candidate (US4); the
+	// early -32001 return above is deliberately not counted.
+	first := cands[0]
+	firstUp := first.Name
+	if firstUp == "" {
+		firstUp = first.URL.Host
+	}
+	done := metrics.TrackInflight(rec.ChainID, firstUp)
+	defer done()
 
 	// Write methods are never retried; notifications are forwarded exactly
 	// once (no response slot to fill, so a retry only doubles upstream load).

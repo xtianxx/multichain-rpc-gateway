@@ -13,6 +13,7 @@ import (
 
 	"github.com/xtianxx/multichain-rpc-gateway/internal/chain"
 	"github.com/xtianxx/multichain-rpc-gateway/internal/config"
+	"github.com/xtianxx/multichain-rpc-gateway/internal/metrics"
 	"github.com/xtianxx/multichain-rpc-gateway/internal/upstream"
 )
 
@@ -88,7 +89,7 @@ func (p *Prober) Start(ctx context.Context) {
 func (p *Prober) probeAll(ctx context.Context) {
 	for _, c := range p.chains {
 		for _, u := range c.Upstreams {
-			p.Probe(ctx, u)
+			p.Probe(ctx, c.ChainID, u)
 		}
 	}
 }
@@ -103,8 +104,11 @@ func (p *Prober) probeAll(ctx context.Context) {
 //	           SetHealth(HealthUnhealthy)
 //
 // Failures are warn-logged (logger.Warn with upstream name + error) WITHOUT
-// the request/response payload. Returns HealthProbeResult.
-func (p *Prober) Probe(ctx context.Context, u *chain.Upstream) HealthProbeResult {
+// the request/response payload. After every probe, regardless of outcome,
+// the upstream gauges (gateway_upstream_up, gateway_upstream_probe_latency_seconds,
+// gateway_upstream_circuit_state) are refreshed under the given chain id.
+// Returns HealthProbeResult.
+func (p *Prober) Probe(ctx context.Context, chainID string, u *chain.Upstream) HealthProbeResult {
 	start := time.Now()
 	ctx, cancel := context.WithTimeout(ctx, p.timeout)
 	defer cancel()
@@ -127,15 +131,49 @@ func (p *Prober) Probe(ctx context.Context, u *chain.Upstream) HealthProbeResult
 		u.RecordProbeOK()
 		u.RecordLatency(res.Latency)
 		u.SetHealth(chain.HealthHealthy)
-		return res
+	} else {
+		streak := u.RecordProbeFail()
+		if streak >= p.failThreshold {
+			u.SetHealth(chain.HealthUnhealthy)
+		}
+		if p.logger != nil {
+			p.logger.Warn("upstream probe failed", "upstream", u.Name, "error", err)
+		}
 	}
 
-	streak := u.RecordProbeFail()
-	if streak >= p.failThreshold {
-		u.SetHealth(chain.HealthUnhealthy)
-	}
-	if p.logger != nil {
-		p.logger.Warn("upstream probe failed", "upstream", u.Name, "error", err)
+	metrics.SetUpstreamProbeLatency(chainID, u.Name, res.Latency)
+	metrics.SetUpstreamUp(chainID, u.Name, healthGaugeValue(u.Health()))
+	if u.Breaker() != nil {
+		metrics.SetUpstreamCircuitState(chainID, u.Name, circuitGaugeValue(u.Breaker().State()))
+	} else {
+		metrics.SetUpstreamCircuitState(chainID, u.Name, metrics.CircuitClosed)
 	}
 	return res
+}
+
+// healthGaugeValue maps a chain health state to the gateway_upstream_up
+// gauge value: healthy -> 1, unhealthy -> 0, any other state (unknown) -> 2.
+func healthGaugeValue(h chain.HealthState) int {
+	switch h {
+	case chain.HealthHealthy:
+		return metrics.UpstreamUpHealthy
+	case chain.HealthUnhealthy:
+		return metrics.UpstreamUpUnhealthy
+	default:
+		return metrics.UpstreamUpUnknown
+	}
+}
+
+// circuitGaugeValue maps a breaker state string to the
+// gateway_upstream_circuit_state gauge value: "open" -> 1, "half-open" -> 2,
+// any other state ("closed") -> 0.
+func circuitGaugeValue(state string) int {
+	switch state {
+	case "open":
+		return metrics.CircuitOpen
+	case "half-open":
+		return metrics.CircuitHalfOpen
+	default:
+		return metrics.CircuitClosed
+	}
 }

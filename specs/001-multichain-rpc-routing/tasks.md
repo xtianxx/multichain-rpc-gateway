@@ -137,16 +137,16 @@
 
 ### Tests for User Story 4（TDD，先写，预期 FAIL）
 
-- [ ] T037 [P] [US4] 编写指标记录测试：请求计数/histogram 按 chain/upstream/method/outcome 维度正确累计到 internal/metrics/recording_test.go
-- [ ] T038 [P] [US4] 编写日志脱敏测试：payload 不落日志、`eth_sendRawTransaction` 私钥/地址/token/URL 凭证脱敏到 internal/logging/logging_test.go（扩展）
+- [X] T037 [P] [US4] 编写指标记录测试：请求计数/histogram 按 chain/upstream/method/outcome 维度正确累计到 internal/metrics/recording_test.go
+- [X] T038 [P] [US4] 编写日志脱敏测试：payload 不落日志、`eth_sendRawTransaction` 私钥/地址/token/URL 凭证脱敏到 internal/logging/logging_test.go（扩展）
 
 ### Implementation for User Story 4
 
-- [ ] T039 [US4] 在请求路径埋点：router/upstream 记录 gateway_requests_total（outcome 含错误码）与 gateway_request_duration_seconds（含上游 RTT）；入站递增、完成递减 gateway_requests_inflight
-- [ ] T040 [US4] 埋点健康指标：prober/breaker 更新 gateway_upstream_up、gateway_upstream_probe_latency_seconds、gateway_upstream_circuit_state gauge
-- [ ] T041 [US4] 接线 HTTP 端点：GET /metrics（promhttp.Handler + go/process collectors）、GET /healthz（200 纯文本）到 cmd/gateway/main.go（metrics_listen 独立监听）
-- [ ] T042 [US4] 每请求结构化日志：chain/method/upstream/outcome/latency/retries（RoutingRecord 流入 slog，脱敏后输出）
-- [ ] T043 [P] [US4] 实现基准套件：进程内 httptest 上游，BenchmarkDirect vs BenchmarkGateway 对比到 bench/passthrough_test.go（`make bench` 输出 ns/op 与 p50 增量）
+- [X] T039 [US4] 在请求路径埋点：router/upstream 记录 gateway_requests_total（outcome 含错误码）与 gateway_request_duration_seconds（含上游 RTT）；入站递增、完成递减 gateway_requests_inflight
+- [X] T040 [US4] 埋点健康指标：prober/breaker 更新 gateway_upstream_up、gateway_upstream_probe_latency_seconds、gateway_upstream_circuit_state gauge
+- [X] T041 [US4] 接线 HTTP 端点：GET /metrics（promhttp.Handler + go/process collectors）、GET /healthz（200 纯文本）到 cmd/gateway/main.go（metrics_listen 独立监听）
+- [X] T042 [US4] 每请求结构化日志：chain/method/upstream/outcome/latency/retries（RoutingRecord 流入 slog，脱敏后输出）
+- [X] T043 [P] [US4] 实现基准套件：进程内 httptest 上游，BenchmarkDirect vs BenchmarkGateway 对比到 bench/passthrough_test.go（`make bench` 输出 ns/op 与 p50 增量）
 
 **Checkpoint**: 全部用户故事独立可用 —— 日志/指标可观测、基准可跑
 
