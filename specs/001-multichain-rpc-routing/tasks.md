@@ -91,15 +91,15 @@
 
 ### Tests for User Story 2（TDD，先写，预期 FAIL）
 
-- [ ] T023 [P] [US2] 编写一致性向量表：id echo、result/error 互斥、标准错误码、batch 保序、notification 处理到 tests/conformance/vectors_test.go
-- [ ] T024 [P] [US2] 编写集成测试：混合链 batch、notification、空 batch -32600、单元素失败其余成功到 tests/integration/batch_test.go
+- [X] T023 [P] [US2] 编写一致性向量表：id echo、result/error 互斥、标准错误码、batch 保序、notification 处理到 tests/conformance/vectors_test.go
+- [X] T024 [P] [US2] 编写集成测试：混合链 batch、notification、空 batch -32600、单元素失败其余成功到 tests/integration/batch_test.go
 
 ### Implementation for User Story 2
 
-- [ ] T025 [US2] 实现 batch 解析与装配：`[]json.RawMessage` 逐元素处理、保序响应数组、notification 不占位、全 notification 空 body 到 internal/jsonrpc/batch.go
-- [ ] T026 [US2] 实现每元素链覆盖：`x-chain-id` 字段解析（string/number → 十进制规范形，优先于头、缺失继承头）、校验后剥离不转发到 internal/router/batch.go（或 router 现有文件扩展）
-- [ ] T027 [US2] 实现 handler batch 编排：POST / 首 token 判定单请求 vs batch、逐元素校验先拒后转、`eth_subscribe` 元素 → -32601（v1 无 WebSocket）、元素级错误（-32000/-32002 等）不阻断兄弟元素到 cmd/gateway/handler.go
-- [ ] T028 [US2] 实现批量限制：max_batch_elements（默认 100，超限 -32003）、max_body_bytes（默认 1 MB，超限 HTTP 400 + -32004），参数取自 config 到 cmd/gateway/handler.go 或 internal/config 调用点
+- [X] T025 [US2] 实现 batch 解析与装配：`[]json.RawMessage` 逐元素处理、保序响应数组、notification 不占位、全 notification 空 body 到 internal/jsonrpc/batch.go
+- [X] T026 [US2] 实现每元素链覆盖：`x-chain-id` 字段解析（string/number → 十进制规范形，优先于头、缺失继承头）、校验后剥离不转发到 internal/router/batch.go（或 router 现有文件扩展）
+- [X] T027 [US2] 实现 handler batch 编排：POST / 首 token 判定单请求 vs batch、逐元素校验先拒后转、`eth_subscribe` 元素 → -32601（v1 无 WebSocket）、元素级错误（-32000/-32002 等）不阻断兄弟元素到 cmd/gateway/handler.go
+- [X] T028 [US2] 实现批量限制：max_batch_elements（默认 100，超限 -32003）、max_body_bytes（默认 1 MB，超限 HTTP 400 + -32004），参数取自 config 到 cmd/gateway/handler.go 或 internal/config 调用点
 
 **Checkpoint**: US1 + US2 均独立可测 —— SC-004 一致性向量全过
 

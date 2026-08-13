@@ -80,7 +80,7 @@ type gateway struct {
 	server *httptest.Server
 }
 
-func startGateway(t *testing.T, ethURL, baseURL string, timeouts map[string]int, maxBodyBytes int64) *gateway {
+func startGateway(t *testing.T, ethURL, baseURL string, timeouts map[string]int, maxBodyBytes int64, maxBatchElements int) *gateway {
 	t.Helper()
 	cfg := &config.Config{
 		Server: config.Server{Timeouts: timeouts, MaxBodyBytes: maxBodyBytes},
@@ -97,7 +97,10 @@ func startGateway(t *testing.T, ethURL, baseURL string, timeouts map[string]int,
 	if maxBodyBytes == 0 {
 		maxBodyBytes = 1048576
 	}
-	h := api.New(rt, maxBodyBytes, logger)
+	if maxBatchElements == 0 {
+		maxBatchElements = 100
+	}
+	h := api.New(rt, maxBodyBytes, maxBatchElements, logger)
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
 	return &gateway{server: srv}
@@ -143,7 +146,7 @@ func TestRoutingByChainHeader(t *testing.T) {
 	defer eth.close()
 	base := newMockUpstream("0x2105")
 	defer base.close()
-	gw := startGateway(t, eth.server.URL, base.server.URL, nil, 0)
+	gw := startGateway(t, eth.server.URL, base.server.URL, nil, 0, 100)
 
 	status, body := post(t, gw.server.URL, map[string]string{"X-Chain-Id": "1"}, `{"jsonrpc":"2.0","method":"eth_chainId","id":1}`)
 	if status != 200 {
@@ -168,7 +171,7 @@ func TestUnknownChainNotForwarded(t *testing.T) {
 	defer eth.close()
 	base := newMockUpstream("0x2105")
 	defer base.close()
-	gw := startGateway(t, eth.server.URL, base.server.URL, nil, 0)
+	gw := startGateway(t, eth.server.URL, base.server.URL, nil, 0, 100)
 
 	status, body := post(t, gw.server.URL, map[string]string{"X-Chain-Id": "999"}, `{"jsonrpc":"2.0","method":"eth_chainId","id":1}`)
 	if status != 200 {
@@ -191,7 +194,7 @@ func TestMissingAndInvalidChainHeader(t *testing.T) {
 	defer eth.close()
 	base := newMockUpstream("0x2105")
 	defer base.close()
-	gw := startGateway(t, eth.server.URL, base.server.URL, nil, 0)
+	gw := startGateway(t, eth.server.URL, base.server.URL, nil, 0, 100)
 
 	status, body := post(t, gw.server.URL, nil, `{"jsonrpc":"2.0","method":"eth_chainId","id":1}`)
 	if status != 200 {
@@ -219,7 +222,7 @@ func TestEthSubscribeRejectedWithoutForwarding(t *testing.T) {
 	defer eth.close()
 	base := newMockUpstream("0x2105")
 	defer base.close()
-	gw := startGateway(t, eth.server.URL, base.server.URL, nil, 0)
+	gw := startGateway(t, eth.server.URL, base.server.URL, nil, 0, 100)
 
 	status, body := post(t, gw.server.URL, map[string]string{"X-Chain-Id": "1"}, `{"jsonrpc":"2.0","method":"eth_subscribe","params":["newHeads"],"id":5}`)
 	if status != 200 {
@@ -239,7 +242,7 @@ func TestIDByteExactEcho(t *testing.T) {
 	defer eth.close()
 	base := newMockUpstream("0x2105")
 	defer base.close()
-	gw := startGateway(t, eth.server.URL, base.server.URL, nil, 0)
+	gw := startGateway(t, eth.server.URL, base.server.URL, nil, 0, 100)
 
 	for _, id := range []string{`"abc-1"`, `1`, `"1"`, `null`, `-7`} {
 		status, body := post(t, gw.server.URL, map[string]string{"X-Chain-Id": "1"}, `{"jsonrpc":"2.0","method":"eth_chainId","id":`+id+`}`)
@@ -257,7 +260,7 @@ func TestNotificationProducesNoResponse(t *testing.T) {
 	defer eth.close()
 	base := newMockUpstream("0x2105")
 	defer base.close()
-	gw := startGateway(t, eth.server.URL, base.server.URL, nil, 0)
+	gw := startGateway(t, eth.server.URL, base.server.URL, nil, 0, 100)
 
 	status, body := post(t, gw.server.URL, map[string]string{"X-Chain-Id": "1"}, `{"jsonrpc":"2.0","method":"eth_chainId"}`)
 	if status != 200 {
@@ -276,7 +279,7 @@ func TestInvalidJSONReturns400ParseError(t *testing.T) {
 	defer eth.close()
 	base := newMockUpstream("0x2105")
 	defer base.close()
-	gw := startGateway(t, eth.server.URL, base.server.URL, nil, 0)
+	gw := startGateway(t, eth.server.URL, base.server.URL, nil, 0, 100)
 
 	status, body := post(t, gw.server.URL, map[string]string{"X-Chain-Id": "1"}, `{`)
 	if status != 400 {
@@ -288,29 +291,12 @@ func TestInvalidJSONReturns400ParseError(t *testing.T) {
 	}
 }
 
-func TestBatchRejectedUntilUS2(t *testing.T) {
-	eth := newMockUpstream("0x1")
-	defer eth.close()
-	base := newMockUpstream("0x2105")
-	defer base.close()
-	gw := startGateway(t, eth.server.URL, base.server.URL, nil, 0)
-
-	status, body := post(t, gw.server.URL, map[string]string{"X-Chain-Id": "1"}, `[{"jsonrpc":"2.0","method":"eth_chainId","id":1}]`)
-	if status != 200 {
-		t.Fatalf("status: got %d", status)
-	}
-	code, _, _ := decodeError(t, body)
-	if code != jsonrpc.CodeInvalidRequest {
-		t.Errorf("code: got %d want -32600", code)
-	}
-}
-
 func TestBodyTooLargeReturns400(t *testing.T) {
 	eth := newMockUpstream("0x1")
 	defer eth.close()
 	base := newMockUpstream("0x2105")
 	defer base.close()
-	gw := startGateway(t, eth.server.URL, base.server.URL, nil, 64)
+	gw := startGateway(t, eth.server.URL, base.server.URL, nil, 64, 100)
 
 	big := `{"jsonrpc":"2.0","method":"eth_getBalance","params":["` + string(bytes.Repeat([]byte("a"), 200)) + `"],"id":1}`
 	status, body := post(t, gw.server.URL, map[string]string{"X-Chain-Id": "1"}, big)
@@ -328,7 +314,7 @@ func TestInvalidUpstreamResponse(t *testing.T) {
 	defer eth.close()
 	base := newMockUpstream("0x2105")
 	defer base.close()
-	gw := startGateway(t, eth.server.URL, base.server.URL, nil, 0)
+	gw := startGateway(t, eth.server.URL, base.server.URL, nil, 0, 100)
 
 	status, body := post(t, gw.server.URL, map[string]string{"X-Chain-Id": "1"}, `{"jsonrpc":"2.0","method":"eth_bad","id":1}`)
 	if status != 200 {
@@ -345,7 +331,7 @@ func TestUpstreamErrorPassthrough(t *testing.T) {
 	defer eth.close()
 	base := newMockUpstream("0x2105")
 	defer base.close()
-	gw := startGateway(t, eth.server.URL, base.server.URL, nil, 0)
+	gw := startGateway(t, eth.server.URL, base.server.URL, nil, 0, 100)
 
 	status, body := post(t, gw.server.URL, map[string]string{"X-Chain-Id": "1"}, `{"jsonrpc":"2.0","method":"eth_error","id":1}`)
 	if status != 200 {
@@ -362,7 +348,7 @@ func TestUpstreamTimeout(t *testing.T) {
 	defer eth.close()
 	base := newMockUpstream("0x2105")
 	defer base.close()
-	gw := startGateway(t, eth.server.URL, base.server.URL, map[string]int{"default": 1}, 0)
+	gw := startGateway(t, eth.server.URL, base.server.URL, map[string]int{"default": 1}, 0, 100)
 
 	start := time.Now()
 	status, body := post(t, gw.server.URL, map[string]string{"X-Chain-Id": "1"}, `{"jsonrpc":"2.0","method":"eth_slow","id":1}`)
@@ -382,7 +368,7 @@ func TestUnreachableUpstream(t *testing.T) {
 	base := newMockUpstream("0x2105")
 	defer base.close()
 	// eth upstream points at a closed port.
-	gw := startGateway(t, "http://127.0.0.1:1", base.server.URL, nil, 0)
+	gw := startGateway(t, "http://127.0.0.1:1", base.server.URL, nil, 0, 100)
 
 	status, body := post(t, gw.server.URL, map[string]string{"X-Chain-Id": "1"}, `{"jsonrpc":"2.0","method":"eth_chainId","id":1}`)
 	if status != 200 {

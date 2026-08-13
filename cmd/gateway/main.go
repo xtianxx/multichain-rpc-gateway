@@ -61,7 +61,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	handler := api.New(rt, cfg.Server.MaxBodyBytes, logger)
+	handler := api.New(rt, cfg.Server.MaxBodyBytes, cfg.Server.MaxBatchElements, logger)
 
 	rpcMux := http.NewServeMux()
 	rpcMux.Handle("/", handler)
