@@ -1,0 +1,29 @@
+# Compiled binaries
+/bin/
+/gateway
+/mockupstream
+*.exe
+
+# Local configuration & secrets (never commit real secrets)
+.env
+.env.*
+config.yaml
+!config.example.yaml
+
+# Test / coverage outputs
+coverage.out
+coverage.html
+*.coverprofile
+*.prof
+
+# Build artifacts
+dist/
+vendor/
+
+# Logs
+*.log
+
+# OS / editor cruft
+.DS_Store
+.idea/
+.vscode/

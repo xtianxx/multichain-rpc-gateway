@@ -24,11 +24,11 @@
 
 **Purpose**: 项目初始化与基础结构
 
-- [ ] T001 初始化 Go module `github.com/xtianxx/multichain-rpc-gateway` 并引入 4 个依赖（gobreaker/v2 v2.4.0、backoff/v4 v4.3.0、prometheus/client_golang v1.24.1、yaml.v3 v3.0.1）写入 go.mod
-- [ ] T002 [P] 编写 ADR 到 docs/adr/：0001-language-runtime-go.md（语言/运行时决策）；0002-jsonrpc-envelope-handwritten.md（手写 JSON-RPC 薄层 vs go-ethereum/rpc 与 JSON-RPC 库——方法注册模型与透传方向相反、geth LGPL/GPL 许可负担；含库级选型 gobreaker/backoff/client_golang/yaml、x-chain-id 命名、-32000~-32005 错误码分配），均含 decision/context/rejected alternatives
-- [ ] T003 [P] 创建 config.example.yaml（Ethereum mainnet chain_id "1" + Base chain_id "8453"，`${ETH_MAINNET_RPC_URL}` / `${BASE_RPC_URL}` 占位符，含 server/prober/retry/circuit 全部字段）
-- [ ] T004 [P] 创建 Makefile（targets：demo、demo-failover、test、test-conformance、lint、bench、load）
-- [ ] T005 [P] 创建 .gitignore（忽略二进制、.env、config.yaml 等含 secrets 文件）
+- [X] T001 初始化 Go module `github.com/xtianxx/multichain-rpc-gateway` 并引入 4 个依赖（gobreaker/v2 v2.4.0、backoff/v4 v4.3.0、prometheus/client_golang v1.24.1、yaml.v3 v3.0.1）写入 go.mod
+- [X] T002 [P] 编写 ADR 到 docs/adr/：0001-language-runtime-go.md（语言/运行时决策）；0002-jsonrpc-envelope-handwritten.md（手写 JSON-RPC 薄层 vs go-ethereum/rpc 与 JSON-RPC 库——方法注册模型与透传方向相反、geth LGPL/GPL 许可负担；含库级选型 gobreaker/backoff/client_golang/yaml、x-chain-id 命名、-32000~-32005 错误码分配），均含 decision/context/rejected alternatives
+- [X] T003 [P] 创建 config.example.yaml（Ethereum mainnet chain_id "1" + Base chain_id "8453"，`${ETH_MAINNET_RPC_URL}` / `${BASE_RPC_URL}` 占位符，含 server/prober/retry/circuit 全部字段）
+- [X] T004 [P] 创建 Makefile（targets：demo、demo-failover、test、test-conformance、lint、bench、load）
+- [X] T005 [P] 创建 .gitignore（忽略二进制、.env、config.yaml 等含 secrets 文件）
 
 **Checkpoint**: `go build ./...` 可通过（空 main 亦可），依赖已锁定
 

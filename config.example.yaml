@@ -1,0 +1,41 @@
+# Example configuration for the multichain-rpc-gateway.
+#
+# This file is an EXAMPLE ONLY. ${VAR} placeholders are substituted from
+# environment variables at startup (fail-fast if a variable is unset).
+# No real URLs or secrets are committed here. For a local demo without real
+# RPC credentials, point the placeholders at the in-process mock upstreams
+# (see specs/001-multichain-rpc-routing/quickstart.md).
+#
+# v1 loads configuration once at startup; changes require a restart
+# (no hot reload). Field contract: specs/001-multichain-rpc-routing/contracts/config-contract.md
+
+server:
+  listen: ":8545"             # required; JSON-RPC listen address
+  metrics_listen: ":9090"     # required; /metrics + /healthz listen address
+  max_batch_elements: 100     # optional; default 100
+  max_body_bytes: 1048576     # optional; default 1048576 = 1 MB
+  timeouts:                   # optional; per-method-class upstream timeouts
+    default: 10               # seconds; default 10
+    eth_getLogs: 30           # method-level override (prefix match, longest match wins)
+prober:                       # optional; active health probing
+  interval: 10s               # default 10s
+  timeout: 5s                 # default 5s
+  fail_threshold: 3           # default 3: consecutive failures mark unhealthy
+retry:                        # optional; safe-method retry
+  max_attempts: 2             # default 2 (includes first attempt)
+  base_delay: 10ms            # default 10ms
+  max_elapsed: 30s            # default 30s
+circuit:                      # optional; circuit breaker
+  fail_threshold: 5           # default 5: consecutive failures open the breaker
+  cooldown: 30s               # default 30s: open -> half-open cooldown
+chains:                       # required; non-empty
+  - chain_id: "1"             # required; decimal string, unique (Ethereum mainnet)
+    adapter: ethereum         # required; registered adapter name
+    upstreams:                # required; at least 1
+      - name: mainnet-a       # optional; log/metric alias (defaults to redacted URL)
+        url: "${ETH_MAINNET_RPC_URL}"  # required; http/https
+  - chain_id: "8453"          # required; decimal string, unique (Base)
+    adapter: base             # required; registered adapter name
+    upstreams:                # required; at least 1
+      - name: base-a          # optional; log/metric alias (defaults to redacted URL)
+        url: "${BASE_RPC_URL}"          # required; http/https
