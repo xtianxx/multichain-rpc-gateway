@@ -156,11 +156,11 @@
 
 **Purpose**: 交付物完善与全量验收
 
-- [ ] T044 [P] 编写 README.md：架构总览、一键 demo 说明、viem 完整可跑示例、配置说明、指标速查
-- [ ] T045 [P] 实现 mock 上游二进制（支持 eth_chainId 等常用方法与故障注入开关）到 cmd/mockupstream/main.go
-- [ ] T046 [P] 编写 demo 脚本与 Makefile 接线：make demo（2 mock 上游 + 网关 + 打印测试命令）、make demo-failover（故障注入端到端演示）
-- [ ] T047 [P] 提供 Grafana 示例面板：每链 QPS/错误率/p50/p95、上游健康热力表到 docs/grafana/example-dashboard.json
-- [ ] T048 [P] 配置 CI：.github/workflows/ci.yml（gofmt 检查 + go vet + go test ./... + test-conformance + make bench：p50 对比直连基线、回归 >20% 阻断合并（FR-017 门禁），全部门禁失败阻断合并）
+- [X] T044 [P] 编写 README.md：架构总览、一键 demo 说明、viem 完整可跑示例、配置说明、指标速查
+- [X] T045 [P] 实现 mock 上游二进制（支持 eth_chainId 等常用方法与故障注入开关）到 cmd/mockupstream/main.go
+- [X] T046 [P] 编写 demo 脚本与 Makefile 接线：make demo（2 mock 上游 + 网关 + 打印测试命令）、make demo-failover（故障注入端到端演示）
+- [X] T047 [P] 提供 Grafana 示例面板：每链 QPS/错误率/p50/p95、上游健康热力表到 docs/grafana/example-dashboard.json
+- [X] T048 [P] 配置 CI：.github/workflows/ci.yml（gofmt 检查 + go vet + go test ./... + test-conformance + make bench：p50 对比直连基线、回归 >20% 阻断合并（FR-017 门禁），全部门禁失败阻断合并）
 - [ ] T049 全量验收 quickstart.md：make test、make test-conformance、make lint、make bench（p50 增量 ≤ 直连 +20%）、make load（vegeta 1000 req/s 60s：成功率 100%、零丢弃、gateway_requests_inflight 有界，SC-006）逐项通过并记录结果
 - [ ] T050 最终代码清理：gofmt -l 为空、go vet 无告警、无 TODO 遗留、secrets 检查（git grep -E '\$\{|PRIVATE_KEY|API_KEY' 确认无真实 secret）
 
