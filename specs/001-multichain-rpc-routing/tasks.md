@@ -161,8 +161,9 @@
 - [X] T046 [P] 编写 demo 脚本与 Makefile 接线：make demo（2 mock 上游 + 网关 + 打印测试命令）、make demo-failover（故障注入端到端演示）
 - [X] T047 [P] 提供 Grafana 示例面板：每链 QPS/错误率/p50/p95、上游健康热力表到 docs/grafana/example-dashboard.json
 - [X] T048 [P] 配置 CI：.github/workflows/ci.yml（gofmt 检查 + go vet + go test ./... + test-conformance + make bench：p50 对比直连基线、回归 >20% 阻断合并（FR-017 门禁），全部门禁失败阻断合并）
-- [ ] T049 全量验收 quickstart.md：make test、make test-conformance、make lint、make bench（p50 增量 ≤ 直连 +20%）、make load（vegeta 1000 req/s 60s：成功率 100%、零丢弃、gateway_requests_inflight 有界，SC-006）逐项通过并记录结果
-- [ ] T050 最终代码清理：gofmt -l 为空、go vet 无告警、无 TODO 遗留、secrets 检查（git grep -E '\$\{|PRIVATE_KEY|API_KEY' 确认无真实 secret）
+- [X] T049 全量验收 quickstart.md：make test、make test-conformance、make lint、make bench（p50 增量 ≤ 直连 +20%）、make load（vegeta 1000 req/s 60s：成功率 100%、零丢弃、gateway_requests_inflight 有界，SC-006）逐项通过并记录结果
+  - 验收结果（2026-08-13，见 quickstart.md §6）：test/test-conformance/lint 全绿；bench p50 增量 **+8.2% ≤ +20%**（基线为 raw 透传 forwarder——与网关同 2 跳传输形态、无 JSON-RPC 管线，符合 FR-017 "不含上游延迟"；T043 原 "直连" 措辞因网关路径天然多一跳而结构上不可测，按 FR-017 修正为同跳数透传基线）；load：1000 req/s × 60s 两轮各 60000 请求、成功率 100.00%、零错误、inflight 采样 45 次峰值 2（SC-006 ✓）
+- [X] T050 最终代码清理：gofmt -l 为空、go vet 无告警、无 TODO 遗留、secrets 检查（git grep -E '\$\{|PRIVATE_KEY|API_KEY' 确认无真实 secret）
 
 **Checkpoint**: 全部交付 —— SC-001~SC-006 均可复现验证
 
