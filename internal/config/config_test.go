@@ -186,6 +186,86 @@ chains:
 	}
 }
 
+func TestLoadDuplicateChainIDLeadingZeros(t *testing.T) {
+	// "1" and "01" canonicalize to the same id (router.New key) and must
+	// collide at load time, not silently overwrite in the router map.
+	yaml := `
+server:
+  listen: ":8545"
+  metrics_listen: ":9090"
+chains:
+  - chain_id: "1"
+    adapter: ethereum
+    upstreams:
+      - url: "https://x.example.com"
+  - chain_id: "01"
+    adapter: ethereum
+    upstreams:
+      - url: "https://y.example.com"
+`
+	_, err := Load(writeConfig(t, yaml))
+	if err == nil || !strings.Contains(err.Error(), "duplicated") {
+		t.Errorf(`chain ids "1" and "01" must collide after canonicalization: %v`, err)
+	}
+}
+
+func TestLoadLeadingZeroChainIDAccepted(t *testing.T) {
+	yaml := `
+server:
+  listen: ":8545"
+  metrics_listen: ":9090"
+chains:
+  - chain_id: "01"
+    adapter: ethereum
+    upstreams:
+      - url: "https://x.example.com"
+`
+	cfg, err := Load(writeConfig(t, yaml))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Chains[0].ChainID != "01" {
+		t.Errorf("raw chain id must be preserved: got %q want %q", cfg.Chains[0].ChainID, "01")
+	}
+}
+
+func TestLoadZeroChainIDEdge(t *testing.T) {
+	// A single all-zeros id is a valid chain id.
+	yaml := `
+server:
+  listen: ":8545"
+  metrics_listen: ":9090"
+chains:
+  - chain_id: "0"
+    adapter: ethereum
+    upstreams:
+      - url: "https://x.example.com"
+`
+	if _, err := Load(writeConfig(t, yaml)); err != nil {
+		t.Errorf(`single chain_id "0" must load: %v`, err)
+	}
+
+	// "0" and "00" both canonicalize to "0" and must collide.
+	yaml = `
+server:
+  listen: ":8545"
+  metrics_listen: ":9090"
+chains:
+  - chain_id: "0"
+    adapter: ethereum
+    upstreams:
+      - url: "https://x.example.com"
+  - chain_id: "00"
+    adapter: ethereum
+    upstreams:
+      - url: "https://y.example.com"
+`
+	_, err := Load(writeConfig(t, yaml))
+	if err == nil || !strings.Contains(err.Error(), "duplicated") {
+		t.Errorf(`chain ids "0" and "00" must collide after canonicalization: %v`, err)
+	}
+}
+
 func TestLoadUpstreamURLValidation(t *testing.T) {
 	for _, tc := range []struct {
 		name string

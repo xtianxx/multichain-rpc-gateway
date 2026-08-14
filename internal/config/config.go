@@ -211,10 +211,18 @@ func Validate(cfg *Config) error {
 		if !decimalRe.MatchString(ch.ChainID) {
 			return fmt.Errorf("chains[%d].chain_id %q must be a decimal non-negative integer string", i, ch.ChainID)
 		}
-		if seen[ch.ChainID] {
+		// Canonicalize before the duplicate check: strip leading zeros
+		// ("01" -> "1", "00" -> "0"), matching the key form router.New
+		// derives via chain.ParseChainID, so ids that would collide at
+		// runtime are rejected at load time.
+		canonical := strings.TrimLeft(ch.ChainID, "0")
+		if canonical == "" {
+			canonical = "0"
+		}
+		if seen[canonical] {
 			return fmt.Errorf("chains[%d].chain_id %q is duplicated", i, ch.ChainID)
 		}
-		seen[ch.ChainID] = true
+		seen[canonical] = true
 		if ch.Adapter == "" {
 			return fmt.Errorf("chains[%d].adapter is required", i)
 		}

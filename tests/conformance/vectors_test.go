@@ -113,6 +113,39 @@ func TestConformanceErrorCodeTable(t *testing.T) {
 	}
 }
 
+// TestConformanceInvalidParamsIDEcho locks the T052 contract: a
+// gateway-generated -32602 on a request with a determinable id echoes the
+// raw id byte-for-byte (numeric 42 stays 42), and an invalid-params
+// notification is reported with the id absent so no error element is
+// produced.
+func TestConformanceInvalidParamsIDEcho(t *testing.T) {
+	req, jrErr := jsonrpc.ParseSingle([]byte(`{"jsonrpc":"2.0","method":"m","params":5,"id":42}`))
+	if jrErr == nil || jrErr.Code != jsonrpc.CodeInvalidParams {
+		t.Fatalf("ParseSingle: want -32602, got %v", jrErr)
+	}
+	if req == nil || string(req.ID) != "42" {
+		t.Fatalf("invalid-params request must carry raw id 42, got %+v", req)
+	}
+	out, err := jsonrpc.NewErrorResponse(req.ID, jrErr.Code, jrErr.Data).Marshal()
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	want := `{"jsonrpc":"2.0","error":{"code":-32602,"message":"Invalid params"},"id":42}`
+	if string(out) != want {
+		t.Errorf("error response:\n got %s\nwant %s", out, want)
+	}
+
+	// A notification with invalid params carries no id: callers must not
+	// produce a response element.
+	req, jrErr = jsonrpc.ParseSingle([]byte(`{"jsonrpc":"2.0","method":"m","params":5}`))
+	if jrErr == nil || jrErr.Code != jsonrpc.CodeInvalidParams {
+		t.Fatalf("ParseSingle: want -32602, got %v", jrErr)
+	}
+	if req == nil || req.ID != nil || !jsonrpc.IsNotification(req) {
+		t.Fatalf("invalid-params notification must be reported as notification, got %+v", req)
+	}
+}
+
 // TestConformanceBatchOrdering locks the US2 batch contract: ParseBatch
 // yields elements in request order (notification in the middle included),
 // and MarshalBatch of the corresponding responses preserves order while

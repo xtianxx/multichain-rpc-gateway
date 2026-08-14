@@ -274,6 +274,56 @@ func TestNotificationProducesNoResponse(t *testing.T) {
 	}
 }
 
+// TestInvalidParamsEchoesID: a gateway-generated -32602 on a request whose
+// id is determinable echoes the raw id byte-for-byte (numeric 42 stays 42,
+// string "42" stays "42"; "id":null is a request and echoes null).
+func TestInvalidParamsEchoesID(t *testing.T) {
+	eth := newMockUpstream("0x1")
+	defer eth.close()
+	base := newMockUpstream("0x2105")
+	defer base.close()
+	gw := startGateway(t, eth.server.URL, base.server.URL, nil, 0, 100)
+
+	for _, id := range []string{`42`, `"42"`, `null`} {
+		status, body := post(t, gw.server.URL, map[string]string{"X-Chain-Id": "1"}, `{"jsonrpc":"2.0","method":"eth_chainId","params":5,"id":`+id+`}`)
+		if status != 200 {
+			t.Fatalf("id %s: status %d", id, status)
+		}
+		code, msg, _ := decodeError(t, body)
+		if code != jsonrpc.CodeInvalidParams || msg != "Invalid params" {
+			t.Errorf("id %s: got code %d msg %q, want -32602 / \"Invalid params\"", id, code, msg)
+		}
+		if !bytes.Contains(body, []byte(`"id":`+id)) {
+			t.Errorf("id %s not echoed byte-for-byte: %s", id, body)
+		}
+	}
+	if eth.hits.Load() != 0 {
+		t.Error("invalid-params requests must not be forwarded")
+	}
+}
+
+// TestInvalidParamsNotificationNoResponse: an invalid-params notification is
+// rejected (never forwarded) but produces no response element, mirroring the
+// valid-notification path (200, empty body).
+func TestInvalidParamsNotificationNoResponse(t *testing.T) {
+	eth := newMockUpstream("0x1")
+	defer eth.close()
+	base := newMockUpstream("0x2105")
+	defer base.close()
+	gw := startGateway(t, eth.server.URL, base.server.URL, nil, 0, 100)
+
+	status, body := post(t, gw.server.URL, map[string]string{"X-Chain-Id": "1"}, `{"jsonrpc":"2.0","method":"eth_chainId","params":5}`)
+	if status != 200 {
+		t.Fatalf("status: got %d", status)
+	}
+	if len(body) != 0 {
+		t.Errorf("invalid-params notification must produce an empty body, got %s", body)
+	}
+	if eth.hits.Load() != 0 {
+		t.Errorf("invalid-params notification must not be forwarded: hits %d", eth.hits.Load())
+	}
+}
+
 func TestInvalidJSONReturns400ParseError(t *testing.T) {
 	eth := newMockUpstream("0x1")
 	defer eth.close()
@@ -359,8 +409,13 @@ func TestUpstreamTimeout(t *testing.T) {
 	if code != jsonrpc.CodeUpstreamTimeout {
 		t.Errorf("code: got %d want -32005", code)
 	}
-	if elapsed := time.Since(start); elapsed > 1900*time.Millisecond {
-		t.Errorf("gateway must return at its own deadline, took %v", elapsed)
+	// T053 semantics: the 1s method timeout bounds each attempt (the old
+	// total/maxAttempts budget split is gone), so the two attempts take
+	// ~2s. The gateway must still return -32005 at its own deadline rather
+	// than hanging on the 2s mock. Bounds mirror the router lane's
+	// TestRoutePerAttemptTimeoutBoundedPerAttempt.
+	if elapsed := time.Since(start); elapsed < 1800*time.Millisecond || elapsed >= 2500*time.Millisecond {
+		t.Errorf("gateway must return at its own deadline (two 1s attempts), took %v", elapsed)
 	}
 }
 

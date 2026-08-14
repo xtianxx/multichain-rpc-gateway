@@ -47,8 +47,17 @@ func IsBatch(body []byte) bool {
 var idNumberRe = regexp.MustCompile(`^-?(0|[1-9][0-9]*)$`)
 
 // ParseSingle validates body as exactly one JSON-RPC 2.0 request object.
-// It returns a *Error carrying the relevant code on failure. The raw bytes of
-// the id and params members are preserved exactly for byte-faithful echoing.
+// It returns a *Error carrying the relevant code on failure. The raw bytes
+// of the id and params members are preserved exactly for byte-faithful
+// echoing.
+//
+// On failure the returned request is nil for every code except
+// CodeInvalidParams: a request-shaped envelope whose params member has the
+// wrong type still returns the partially populated request (method, raw
+// params, and raw id when the id member is present) so callers can
+// distinguish an invalid-params notification (IsNotification) and echo the
+// id byte-for-byte. A notification is an envelope without an id member; an
+// explicit "id":null is a request.
 func ParseSingle(body []byte) (*Request, *Error) {
 	dec := json.NewDecoder(bytes.NewReader(body))
 	dec.UseNumber()
@@ -94,19 +103,10 @@ func ParseSingle(body []byte) (*Request, *Error) {
 
 	req := &Request{Method: method}
 
-	// params: if present, must be array, object, or null.
-	if paramsRaw, ok := members["params"]; ok {
-		p := skipWhitespace(paramsRaw)
-		if len(p) == 0 || (p[0] != '[' && p[0] != '{' && p[0] != 'n') {
-			return nil, errJSON(CodeInvalidParams)
-		}
-		if p[0] == 'n' && string(p) != "null" {
-			return nil, errJSON(CodeInvalidParams)
-		}
-		req.Params = paramsRaw
-	}
-
-	// id: if present, must be string, integer number, or null.
+	// id: detected and validated BEFORE params so an invalid-params result
+	// can still report whether the envelope was a notification and expose
+	// the raw id for byte-for-byte echoing. If present, id must be a
+	// string, integer number, or null.
 	if idRaw, ok := members["id"]; ok {
 		id := skipWhitespace(idRaw)
 		switch {
@@ -133,6 +133,22 @@ func ParseSingle(body []byte) (*Request, *Error) {
 			}
 		}
 		req.ID = idRaw
+	}
+
+	// params: if present, must be array, object, or null. On failure the
+	// partially populated request is returned so the caller can tell a
+	// notification from a request and echo a determinable raw id.
+	if paramsRaw, ok := members["params"]; ok {
+		p := skipWhitespace(paramsRaw)
+		if len(p) == 0 || (p[0] != '[' && p[0] != '{' && p[0] != 'n') {
+			req.Params = paramsRaw
+			return req, errJSON(CodeInvalidParams)
+		}
+		if p[0] == 'n' && string(p) != "null" {
+			req.Params = paramsRaw
+			return req, errJSON(CodeInvalidParams)
+		}
+		req.Params = paramsRaw
 	}
 
 	return req, nil

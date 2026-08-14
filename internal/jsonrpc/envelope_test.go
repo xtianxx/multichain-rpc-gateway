@@ -47,6 +47,54 @@ func TestParseSingleValid(t *testing.T) {
 	}
 }
 
+// TestParseSingleInvalidParamsCarriesRequest verifies that an invalid-params
+// failure (-32602) still returns the request envelope: callers can tell
+// whether it was a notification (id member absent), read the raw id for
+// byte-exact echoing, and see the offending params. An explicit "id":null
+// is a request, not a notification.
+func TestParseSingleInvalidParamsCarriesRequest(t *testing.T) {
+	cases := []struct {
+		name         string
+		body         string
+		notification bool
+		wantID       string // raw id bytes; "" when the member is absent
+	}{
+		{"notification-number-params", `{"jsonrpc":"2.0","method":"m","params":5}`, true, ""},
+		{"notification-string-params", `{"jsonrpc":"2.0","method":"m","params":"x"}`, true, ""},
+		{"notification-bool-params", `{"jsonrpc":"2.0","method":"m","params":true}`, true, ""},
+		{"id-number", `{"jsonrpc":"2.0","method":"m","params":5,"id":42}`, false, "42"},
+		{"id-string", `{"jsonrpc":"2.0","method":"m","params":5,"id":"42"}`, false, `"42"`},
+		{"id-null-is-request", `{"jsonrpc":"2.0","method":"m","params":5,"id":null}`, false, "null"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req, jrErr := ParseSingle([]byte(tc.body))
+			if jrErr == nil || jrErr.Code != CodeInvalidParams {
+				t.Fatalf("ParseSingle(%s): want -32602, got %v", tc.body, jrErr)
+			}
+			if req == nil {
+				t.Fatalf("ParseSingle(%s): invalid-params failure must return the request", tc.body)
+			}
+			if req.Method != "m" {
+				t.Errorf("method: got %q want m", req.Method)
+			}
+			if IsNotification(req) != tc.notification {
+				t.Errorf("IsNotification: got %v want %v (body %s)", IsNotification(req), tc.notification, tc.body)
+			}
+			if tc.wantID == "" {
+				if req.ID != nil {
+					t.Errorf("id: want nil, got %q", req.ID)
+				}
+			} else if string(req.ID) != tc.wantID {
+				t.Errorf("id: got %q want %q (raw bytes)", req.ID, tc.wantID)
+			}
+			if string(req.Params) == "" {
+				t.Errorf("params: raw invalid params must be preserved (body %s)", tc.body)
+			}
+		})
+	}
+}
+
 // TestIsNotification checks that absence of the id member (and only that)
 // marks a notification; an explicit null id is NOT a notification.
 func TestIsNotification(t *testing.T) {

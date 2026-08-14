@@ -115,8 +115,10 @@ func chainNotConfigured(raw any) *jsonrpc.Error {
 
 // Route forwards req through ch's upstreams with retry and failover, and
 // returns the shaped result, a JSON-RPC error (gateway or upstream
-// passthrough), and the routing record. The per-method-class timeout bounds
-// the whole attempt sequence; each attempt gets an equal slice of it.
+// passthrough), and the routing record. Every attempt is bounded by the
+// per-method-class timeout (server.timeouts.<method>, default 10s); the
+// whole attempt+backoff sequence is bounded by retry.max_elapsed (default
+// 30s; no overall cap when <= 0).
 func (r *Router) Route(ctx context.Context, ch *chain.Chain, req *jsonrpc.Request) (result json.RawMessage, jrErr *jsonrpc.Error, rec RoutingRecord) {
 	rec = RoutingRecord{ChainID: ch.ChainID, Method: req.Method}
 	start := time.Now()
@@ -133,8 +135,15 @@ func (r *Router) Route(ctx context.Context, ch *chain.Chain, req *jsonrpc.Reques
 		r.logRecord(rec)
 	}()
 
-	ctx, cancel := context.WithTimeout(ctx, r.methodTimeout(req.Method))
-	defer cancel()
+	// Per-attempt timeout: server.timeouts.<method> (default 10s). Every
+	// attempt gets its own context.WithTimeout with this value; the old
+	// total/maxAttempts split is gone (T053).
+	attemptTimeout := r.methodTimeout(req.Method)
+	// Overall deadline: retry.max_elapsed bounds the whole attempt+backoff
+	// sequence (default 30s; no cap when <= 0). Expiry of either deadline
+	// surfaces as the timeout error -32005, never a hang.
+	overallCtx, overallCancel := r.overallContext(ctx)
+	defer overallCancel()
 
 	params, err := ch.Adapter.NormalizeParams(req.Params)
 	if err != nil {
@@ -195,11 +204,6 @@ func (r *Router) Route(ctx context.Context, ch *chain.Chain, req *jsonrpc.Reques
 		maxAttempts = 2
 	}
 
-	total := r.methodTimeout(req.Method)
-	attemptTimeout := total / time.Duration(maxAttempts)
-	if attemptTimeout <= 0 {
-		attemptTimeout = total
-	}
 	bo := upstream.Backoff(r.cfg.Retry, req.Method)
 
 	var lastErr error
@@ -211,13 +215,16 @@ retryLoop:
 			rec.Upstream = up.URL.Host
 		}
 
-		attemptCtx, attemptCancel := context.WithTimeout(ctx, attemptTimeout)
+		attemptCtx, attemptCancel := context.WithTimeout(overallCtx, attemptTimeout)
 		attemptStart := time.Now()
 		respBody, err := up.Execute(func() ([]byte, error) {
 			return upstream.Forward(attemptCtx, up, body, req.ID)
 		})
 		attemptLatency := time.Since(attemptStart)
 		attemptCancel()
+		// Reflect the breaker state on the request path (T057/FR-014): the
+		// probe loop only refreshes this gauge on its tick (default 10s).
+		r.updateCircuitGauge(ch, up)
 
 		if err == nil {
 			up.RecordLatency(attemptLatency)
@@ -243,7 +250,7 @@ retryLoop:
 			return ch.Adapter.ShapeResponse(parsed.Result), nil, rec
 		}
 
-		// Retryable failure: back off (aborting early once the request
+		// Retryable failure: back off (aborting early once the overall
 		// deadline fires) and move to the next candidate.
 		lastErr = err
 		if attempt+1 >= maxAttempts {
@@ -256,7 +263,7 @@ retryLoop:
 		if d > 0 {
 			select {
 			case <-time.After(d):
-			case <-ctx.Done():
+			case <-overallCtx.Done():
 				lastErr = upstream.ErrUpstreamTimeout
 				break retryLoop
 			}
@@ -268,12 +275,13 @@ retryLoop:
 	return nil, jrErr, rec
 }
 
-// candidates returns the try order for ch: upstreams with an open circuit
-// breaker are excluded; healthy upstreams come first (lowest EWMA latency
-// first, stable), then unknown ones, then unhealthy ones, each group in
-// config order.
+// candidates returns the try order for ch (data-model §1.1): upstreams with
+// an open circuit breaker are excluded, and so are probe-unhealthy ones
+// (they recover via probes, same philosophy as breaker-open). Healthy
+// upstreams come first (lowest EWMA latency first, stable), then unknown
+// ones, each group in config order.
 func (r *Router) candidates(ch *chain.Chain) []*chain.Upstream {
-	var healthy, unknown, unhealthy []*chain.Upstream
+	var healthy, unknown []*chain.Upstream
 	for _, u := range ch.Upstreams {
 		if u.BreakerOpen() {
 			continue
@@ -282,13 +290,51 @@ func (r *Router) candidates(ch *chain.Chain) []*chain.Upstream {
 		case chain.HealthHealthy:
 			healthy = append(healthy, u)
 		case chain.HealthUnhealthy:
-			unhealthy = append(unhealthy, u)
+			// Excluded from routing entirely; an unhealthy upstream only
+			// returns via successful probes (data-model §1.1).
 		default:
 			unknown = append(unknown, u)
 		}
 	}
 	sort.SliceStable(healthy, func(i, j int) bool { return healthy[i].Latency() < healthy[j].Latency() })
-	return append(append(healthy, unknown...), unhealthy...)
+	return append(healthy, unknown...)
+}
+
+// overallContext bounds the whole attempt+backoff sequence with
+// retry.max_elapsed (default 30s). A non-positive max_elapsed means no
+// overall cap; the caller's context still applies in every case.
+func (r *Router) overallContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	if maxElapsed := r.cfg.Retry.MaxElapsed.Std(); maxElapsed > 0 {
+		return context.WithTimeout(ctx, maxElapsed)
+	}
+	return ctx, func() {}
+}
+
+// updateCircuitGauge refreshes gateway_upstream_circuit_state for up after a
+// request-path execution, so breaker transitions are visible immediately
+// rather than on the next probe tick. Label schema (chain, upstream) and
+// value encoding (closed 0 / open 1 / half-open 2) match the prober.
+func (r *Router) updateCircuitGauge(ch *chain.Chain, up *chain.Upstream) {
+	if up.Breaker() == nil {
+		metrics.SetUpstreamCircuitState(ch.ChainID, up.Name, metrics.CircuitClosed)
+		return
+	}
+	metrics.SetUpstreamCircuitState(ch.ChainID, up.Name, circuitGaugeValue(up.Breaker().State()))
+}
+
+// circuitGaugeValue maps a breaker state string to the
+// gateway_upstream_circuit_state gauge value: "open" -> 1, "half-open" -> 2,
+// any other state ("closed") -> 0. This is the prober's encoding, mirrored
+// here for the request path.
+func circuitGaugeValue(state string) int {
+	switch state {
+	case "open":
+		return metrics.CircuitOpen
+	case "half-open":
+		return metrics.CircuitHalfOpen
+	default:
+		return metrics.CircuitClosed
+	}
 }
 
 // Chains returns all configured chains sorted by chain id ascending (decimal

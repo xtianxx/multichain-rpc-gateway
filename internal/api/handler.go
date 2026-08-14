@@ -76,6 +76,18 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if jrErr.Code == jsonrpc.CodeParseError {
 			status = http.StatusBadRequest
 		}
+		// An invalid-params notification (envelope without an id member)
+		// is rejected but never answered: no response element, mirroring
+		// the valid-notification path. A request with a determinable id
+		// echoes it byte-for-byte; -32700/-32600/-32603 keep id null.
+		if req != nil {
+			if jsonrpc.IsNotification(req) {
+				w.WriteHeader(http.StatusOK)
+				return
+			}
+			h.writeError(w, status, req.ID, jrErr.Code, jrErr.Data)
+			return
+		}
 		h.writeError(w, status, nil, jrErr.Code, nil)
 		return
 	}
@@ -150,9 +162,16 @@ func (h *Handler) serveBatch(w http.ResponseWriter, r *http.Request, body []byte
 	for _, el := range els {
 		switch {
 		case el.Err != nil:
-			// Invalid element: error response with id null, sibling isolated.
+			// Invalid element, sibling isolated. An invalid-params
+			// notification (no id member) is rejected but produces no
+			// response element; everything else gets an error response
+			// echoing the raw id when determinable (-32602) or id null
+			// (-32700/-32600/-32603).
 			metrics.RecordRequest("-", "-", "-", strconv.Itoa(el.Err.Code))
-			responses = append(responses, jsonrpc.NewErrorResponse(nil, el.Err.Code, el.Err.Data))
+			if el.Notification {
+				continue
+			}
+			responses = append(responses, jsonrpc.NewErrorResponse(el.ID, el.Err.Code, el.Err.Data))
 		case el.Request.Method == "eth_subscribe":
 			// No WebSocket support: never forward, notification or not.
 			// A subscribe notification is swallowed without a response

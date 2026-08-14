@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -98,7 +99,12 @@ func main() {
 	// Active upstream health probing (US3): eth_chainId probes feed the
 	// health state machine and the circuit breakers. Runs until shutdown.
 	pr := prober.New(rt.Chains(), cfg.Prober, logger)
-	go pr.Start(ctx)
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		pr.Start(ctx)
+	}()
 
 	errCh := make(chan error, 2)
 	go func() { errCh <- rpcServer.ListenAndServe() }()
@@ -121,6 +127,9 @@ func main() {
 		defer cancel()
 		_ = rpcServer.Shutdown(shutdownCtx)
 		_ = metricsServer.Shutdown(shutdownCtx)
+		// pr.Start observes the signal ctx and returns when it is
+		// cancelled; wait for the probe loop to unwind before exiting.
+		wg.Wait()
 		logger.Info("gateway stopped")
 	}
 }

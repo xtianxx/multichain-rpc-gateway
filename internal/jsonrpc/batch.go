@@ -13,6 +13,16 @@ type BatchElement struct {
 	Request       *Request        // nil when Err != nil
 	ChainOverride json.RawMessage // raw "x-chain-id" member; nil when absent
 	Err           *Error          // per-element validation error; nil when valid
+	// ID is the byte-exact id member of an invalid request-shaped element
+	// (currently only CodeInvalidParams) when the id member was present;
+	// nil when the id is undeterminable (parse/envelope errors). The id of
+	// an otherwise valid element lives on Request.ID.
+	ID json.RawMessage
+	// Notification reports that an invalid request-shaped element had no
+	// id member: it is rejected (never forwarded) but must never produce a
+	// response element (validate-before-forward). Always false for valid
+	// elements.
+	Notification bool
 }
 
 // ParseBatch validates body as a JSON-RPC 2.0 batch. Body-level failures
@@ -57,7 +67,16 @@ func ParseBatch(body []byte) ([]BatchElement, *Error) {
 		}
 		req, jrErr := ParseSingle(el)
 		if jrErr != nil {
-			out = append(out, BatchElement{Err: jrErr})
+			be := BatchElement{Err: jrErr}
+			if req != nil {
+				// Request-shaped element with invalid params: expose
+				// whether it was a notification and the raw id so the
+				// caller can skip the response element or echo the id
+				// byte-for-byte.
+				be.ID = req.ID
+				be.Notification = IsNotification(req)
+			}
+			out = append(out, be)
 			continue
 		}
 		var chainOverride json.RawMessage

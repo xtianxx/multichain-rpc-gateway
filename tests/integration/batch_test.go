@@ -479,9 +479,9 @@ func TestBatchInvalidNotificationNotForwarded(t *testing.T) {
 	defer base.close()
 	gw := startGateway(t, eth.server.URL, base.server.URL, nil, 0, 100)
 
-	// A no-id element with envelope-invalid params is an invalid request
-	// element: it yields an error response with id null and is never
-	// forwarded, while the sibling succeeds.
+	// A no-id element with envelope-invalid params is rejected at parse
+	// time (never forwarded) and produces NO response element: the batch
+	// array only carries the id-bearing sibling.
 	status, body := post(t, gw.server.URL, map[string]string{"X-Chain-Id": "1"}, `[
 		{"jsonrpc":"2.0","method":"eth_chainId","params":1},
 		{"jsonrpc":"2.0","method":"eth_chainId","id":1}
@@ -490,17 +490,48 @@ func TestBatchInvalidNotificationNotForwarded(t *testing.T) {
 		t.Fatalf("status: got %d", status)
 	}
 	els := decodeBatch(t, body)
-	if len(els) != 2 {
-		t.Fatalf("response count: got %d want 2 (body %s)", len(els), body)
+	if len(els) != 1 {
+		t.Fatalf("response count: got %d want 1 (invalid notification must produce no element; body %s)", len(els), body)
 	}
-	if code := errorCode(els[0]); code != jsonrpc.CodeInvalidParams {
-		t.Errorf("invalid element code: got %d want -32602 (body %s)", code, body)
-	}
-	assertBatchIDs(t, body, "null", "1")
-	if got, _ := els[1]["result"].(string); got != "0x1" {
+	assertBatchIDs(t, body, "1")
+	if got, _ := els[0]["result"].(string); got != "0x1" {
 		t.Errorf("valid sibling must succeed: got %q (body %s)", got, body)
 	}
 	if eth.hits.Load() != 1 {
 		t.Errorf("invalid notification must not be forwarded: hits %d want 1", eth.hits.Load())
+	}
+}
+
+func TestBatchInvalidParamsEchoesID(t *testing.T) {
+	eth := newMockUpstream("0x1")
+	defer eth.close()
+	base := newMockUpstream("0x2105")
+	defer base.close()
+	gw := startGateway(t, eth.server.URL, base.server.URL, nil, 0, 100)
+
+	// A params-invalid element WITH an id member is answered with -32602
+	// echoing the raw id byte-for-byte (never re-marshaled: numeric 42
+	// stays 42, string "42" stays "42"). An explicit "id":null is a
+	// request and gets a response element with id null.
+	status, body := post(t, gw.server.URL, map[string]string{"X-Chain-Id": "1"}, `[
+		{"jsonrpc":"2.0","method":"eth_chainId","params":1,"id":42},
+		{"jsonrpc":"2.0","method":"eth_chainId","params":1,"id":"42"},
+		{"jsonrpc":"2.0","method":"eth_chainId","params":1,"id":null}
+	]`)
+	if status != 200 {
+		t.Fatalf("status: got %d", status)
+	}
+	els := decodeBatch(t, body)
+	if len(els) != 3 {
+		t.Fatalf("response count: got %d want 3 (%s)", len(els), body)
+	}
+	for i := range els {
+		if code := errorCode(els[i]); code != jsonrpc.CodeInvalidParams {
+			t.Errorf("element %d code: got %d want -32602 (body %s)", i, code, body)
+		}
+	}
+	assertBatchIDs(t, body, "42", `"42"`, "null")
+	if eth.hits.Load() != 0 || base.hits.Load() != 0 {
+		t.Errorf("invalid-params elements must not be forwarded: hits eth=%d base=%d", eth.hits.Load(), base.hits.Load())
 	}
 }

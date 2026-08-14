@@ -48,7 +48,11 @@ v1 无 WebSocket；`eth_subscribe` 类订阅方法返回 -32601 Method not found
 | 其余一切（含网关/上游错误、batch 超限） | 200 | JSON-RPC 错误对象/数组 |
 
 - Content-Type 宽松处理：不强制校验头，直接解析 body
-- 每个请求有界截止时间（默认 10s，`eth_getLogs` 类 30s）；超时按 -32005 处理，绝不挂起
+- **Timeouts (FR-009)**: every attempt is bounded by the per-method-class
+  upstream timeout (`server.timeouts.<method>`; default 10s, e.g. 30s for
+  `eth_getLogs`), and the whole attempt+backoff sequence is bounded by
+  `retry.max_elapsed` (default 30s; no overall cap when <= 0). Expiry of
+  either deadline is answered with -32005; the gateway never hangs.
 
 ## 6. 错误码表
 
