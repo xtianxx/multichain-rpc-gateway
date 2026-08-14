@@ -12,11 +12,12 @@ commit messages are in English.
   refactor. Contract changes require updated tests in the same change.
 - `specs/001-multichain-rpc-routing/tasks.md` is the progress ledger: tick
   checkboxes `[X]` as tasks complete and commit after each task or logical
-  group. Phases are strictly sequential — Phase 2 done, Phase 3 done,
-  Phases 4-7 (T023-T050) pending.
+  group. Phases are strictly sequential — Phases 1-7 complete; Phase 8
+  convergence tasks T051-T058 appended by /speckit.converge and being
+  implemented.
 - No new third-party dependencies. Allowed runtime deps: prometheus/client_golang,
-  gopkg.in/yaml.v3 (gobreaker, backoff are planned for later phases only — not
-  yet in go.mod). Run `go mod tidy` once per work batch, never from parallel lanes.
+  gopkg.in/yaml.v3, sony/gobreaker/v2 v2.4.0, cenkalti/backoff/v4 v4.3.0 (both
+  in go.mod). Run `go mod tidy` once per work batch, never from parallel lanes.
 - Commit style: `feat: phase N ...`, `docs: ...`, `build: ...` (English).
 - Spec Kit hooks in `.specify/extensions.yml` are `optional: true` auto-commits —
   announce, don't force-execute them.
@@ -26,12 +27,11 @@ commit messages are in English.
 - `make test` — `go test ./...` (unit + in-process integration via httptest mocks)
 - `make lint` — `go vet ./...` + `gofmt -l .` (the CI-equivalent gate; both must be clean)
 - `go test -run Name ./internal/router/` — single package/test
-- NOT yet runnable (future phases): `make demo`, `make demo-failover`,
-  `make test-conformance`, `make bench`, `make load` — they reference
-  `scripts/`, `cmd/mockupstream`, `tests/conformance/`, `bench/` which don't
-  exist yet.
-- No root README yet (Phase 7); `specs/001-multichain-rpc-routing/quickstart.md`
-  is the operational runbook.
+- Runnable now: `make demo`, `make demo-failover`, `make test-conformance`,
+  `make bench`, `make load` — they reference `scripts/`, `cmd/mockupstream`,
+  `tests/conformance/`, `bench/` which all exist.
+- README.md exists; `specs/001-multichain-rpc-routing/quickstart.md` is the
+  operational runbook.
 
 ## Architecture
 
@@ -60,7 +60,7 @@ commit messages are in English.
   never re-marshal.
 - Chain addressing: `X-Chain-Id` header (decimal). v1 status quo: batch
   requests → -32600 placeholder, `eth_subscribe` → -32601 (no WebSocket);
-  per-element `x-chain-id` override is US2, not yet implemented.
+  per-element `x-chain-id` override implemented (internal/router/batch.go).
 - Config env vars use `${VAR}` regex substitution before yaml.Unmarshal (not
   os.ExpandEnv); an unset var is a load error. Unknown YAML fields are rejected.
 - Never log payloads; route through `logging.Redact`. Secrets only via env
