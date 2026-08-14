@@ -266,3 +266,18 @@ Task: "internal/metrics/metrics.go"
 - 宪法 I：加链 = 配置 + adapter，路由核心零改动（SC-005）
 - 宪法 V：仅 4 个第三方库，无投机抽象；payload 永不落日志
 - 每个任务或逻辑组完成后 commit；每个 Checkpoint 停下独立验证
+
+---
+
+## Phase 8: Convergence
+
+**Purpose**: /speckit.converge 评估产出 —— 对照 spec/plan/tasks/constitution 检查现状代码发现的剩余缺口（无 CRITICAL/HIGH；3 MEDIUM + 5 LOW）。
+
+- [ ] T051 修复 notification + invalid params 行为：ParseSingle 在参数校验前提取 id/notification 状态，无 id 成员的通知即使参数无效也不产生响应元素（单请求与 batch 路径均吞掉响应，仍先拒后转）；同步更新 tests/integration/batch_test.go 中固化偏差行为的用例 per spec Edge Case（notification 无效参数）/jsonrpc-api §7 (contradicts)
+- [ ] T052 修复网关侧 -32602 的 id 回显：可确定 id 时错误响应回显请求 id（仅不可确定时为 null）；新增一致性向量 `{"jsonrpc":"2.0","method":"m","params":5,"id":42}` → id:42 per Constitution II / SC-004 (partial)
+- [ ] T053 修复重试截止时间接线：单次尝试超时取 `server.timeouts.<method>`（默认 10s），整体请求截止取 `retry.max_elapsed`（默认 30s），替换 `attemptTimeout = total/maxAttempts` 切分；同步对齐 jsonrpc-api §5 的总体表述 per FR-009/FR-011 (partial)
+- [ ] T054 对齐上游排序规则：candidates() 按 data-model §1.1 权威排序（healthy → EWMA 升序 → unknown 垫底），明确 unhealthy 处置（排除或真正垫底）并同步 failover_test per FR-007 (partial)
+- [ ] T055 更新 AGENTS.md 过期陈述：Phases 4-7 已完成、x-chain-id 已实现、gobreaker/backoff 已在 go.mod、README 已存在、demo/bench/load 已可运行 per AGENTS.md 现状 (contradicts)
+- [ ] T056 优雅停机接入 prober 协程：HTTP Shutdown 后、退出前 WaitGroup 等待 prober 停止 per FR-014 (partial)
+- [ ] T057 请求路径断路器状态变更即时更新 gateway_upstream_circuit_state gauge（不等下一探测周期）per metrics-contract §1 (partial)
+- [ ] T058 启动校验重复 chain_id 前先规范化（去前导零）再比较，拒绝 "1" 与 "01" 并存 per config-contract §2 / data-model §1.1 (partial)
