@@ -1,6 +1,6 @@
 # 多链 RPC 网关（Multichain RPC Gateway）
 
-> [English](./README_EN.md) | **中文（默认）**
+> [English](./README_EN.md) | **中文**
 
 一个用 Go 编写的 JSON-RPC 2.0 网关，对所有已支持的链暴露**单一 HTTP 端口**：客户端通过 `X-Chain-Id` HTTP 头（十进制 chain id）选择目标链，网关解析链、将请求转发到对应上游，并将结果按原样回显（`id` 逐字节保留）。完整支持 JSON-RPC 2.0 批量请求（有序响应、通知语义、按元素的链覆盖），并在纯转发之上提供韧性能力：每条链多上游 + 基于健康探测的选择、故障上游自动 failover、安全方法限定的有界指数退避重试（`eth_sendRawTransaction` 永不重试）、以及对连续失败上游的熔断隔离直至探测恢复。运维侧提供 Prometheus 指标（`GET /metrics`）覆盖请求量、错误率、时延分位数、健康与熔断状态，以及 payload 与敏感信息脱敏的结构化 JSON 日志。v1 不支持 WebSocket（`eth_subscribe` 返回 -32601）。
 
