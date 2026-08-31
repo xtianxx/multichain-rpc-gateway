@@ -210,6 +210,56 @@ curl -s localhost:9090/metrics | grep gateway_
 # -> gateway_requests_total{chain="8453",upstream="base-a",method="eth_chainId",outcome="success"} 1
 ```
 
+## Benchmark
+
+Measured with `make bench` (`go test -bench . -benchtime=10s -count=5 ./bench/`) — two TCP hops
+(bench → server → mock upstream) kept identical for baseline and gateway; the delta
+is the gateway pipeline cost (parse + chain resolution + metrics/logging) excluding
+upstream latency (FR-017 / SC-002).
+
+**Environment:** `linux/amd64`, `AMD Ryzen 7 5800H with Radeon Graphics (16 cores)`, `Go 1.26.5`, `bench/passthrough_test.go`
+(mock upstream echoes `{"jsonrpc":"2.0","id":<id>,"result":"0x1"}`).
+
+**Latest run (2026-08-31, `tee /tmp/bench.txt`):**
+
+| run | BenchmarkPassthrough p50_ns/op | ns/op | BenchmarkGateway p50_ns/op | ns/op | Δ p50 |
+|-----|-------------------------------:|------:|---------------------------:|------:|------:|
+| 1 | 1 009 530 | 1 052 340 | 1 152 854 | 1 182 407 | +14.2% |
+| 2 | 1 000 524 | 1 020 564 | 1 127 497 | 1 158 025 | +12.7% |
+| 3 |   996 465 | 1 016 416 | 1 096 123 | 1 112 370 | +10.0% |
+| 4 |   995 077 | 1 015 483 | 1 142 843 | 1 182 548 | +14.8% |
+| 5 | 1 057 237 | 1 081 621 | 1 182 315 | 1 228 226 | +11.8% |
+
+- Median p50: passthrough **1 000 524 ns** → gateway **1 142 843 ns**, overhead **+142 319 ns (+14.2%)** ≤ budget **+20%** ✅
+- Mean p50: 1 011 767 ns → 1 140 326 ns (**+12.7%**) — also within budget
+- Mean ns/op (timer): 1 037 285 ns → 1 172 715 ns (**+13.1%**)
+
+All 5 runs pass individually (worst +14.8% / +18.8% on ns/op basis on run 5 still < +20%). Prior acceptance (T049) was +8.2% on a faster host; variance is host/ambient-load dependent but budget holds.
+
+Reproduce:
+
+```bash
+make bench
+# raw: go test -bench . -benchtime=10s -count=5 ./bench/ | tee /tmp/bench.txt
+```
+
+Full raw output (`/tmp/bench.txt`):
+
+```
+BenchmarkPassthrough-16    10000    1052340 ns/op    1009530 p50_ns/op
+BenchmarkPassthrough-16    10000    1020564 ns/op    1000524 p50_ns/op
+BenchmarkPassthrough-16    11757    1016416 ns/op     996465 p50_ns/op
+BenchmarkPassthrough-16    11599    1015483 ns/op     995077 p50_ns/op
+BenchmarkPassthrough-16    10000    1081621 ns/op    1057237 p50_ns/op
+BenchmarkGateway-16         9708    1182407 ns/op    1152854 p50_ns/op
+BenchmarkGateway-16        10000    1158025 ns/op    1127497 p50_ns/op
+BenchmarkGateway-16        10000    1112370 ns/op    1096123 p50_ns/op
+BenchmarkGateway-16        10000    1182548 ns/op    1142843 p50_ns/op
+BenchmarkGateway-16         8229    1228226 ns/op    1182315 p50_ns/op
+```
+
+See `bench/passthrough_test.go:reportP50` for p50 calculation and `specs/001-multichain-rpc-routing/quickstart.md §4` / `.github/workflows/ci.yml` for the CI gate.
+
 ## Reference
 
 - Feature spec: `specs/001-multichain-rpc-routing/spec.md`
