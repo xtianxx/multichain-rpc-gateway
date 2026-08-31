@@ -1,22 +1,10 @@
-# Multichain RPC Gateway
+# 多链 RPC 网关（Multichain RPC Gateway）
 
-A JSON-RPC 2.0 gateway written in Go that exposes a **single HTTP endpoint** for
-every supported chain and routes each request to a per-chain upstream: the
-client selects the target chain with the `X-Chain-Id` HTTP header (decimal
-chain id), and the gateway resolves the chain, forwards the request to a
-configured upstream, and echoes the result back byte-for-byte with the exact
-request id. It fully supports JSON-RPC 2.0 batches (ordered responses,
-notification semantics, per-element chain override) and adds resilience on top
-of plain forwarding: multiple upstreams per chain with health-probe-driven
-selection, failover to healthy upstreams, bounded exponential-backoff retries
-for safe methods only (`eth_sendRawTransaction` is never retried), and circuit
-breakers that cut off repeatedly failing upstreams until recovery probes pass.
-Operationally it ships Prometheus metrics (`GET /metrics`) covering request
-rate, error rate, latency percentiles, health, and circuit state per chain and
-per upstream, plus structured JSON logs with payloads and secrets redacted.
-WebSocket transport is out of scope for v1 (`eth_subscribe` returns -32601).
+> [English](./README_EN.md) | **中文（默认）**
 
-## Architecture
+一个用 Go 编写的 JSON-RPC 2.0 网关，对所有已支持的链暴露**单一 HTTP 端口**：客户端通过 `X-Chain-Id` HTTP 头（十进制 chain id）选择目标链，网关解析链、将请求转发到对应上游，并将结果按原样回显（`id` 逐字节保留）。完整支持 JSON-RPC 2.0 批量请求（有序响应、通知语义、按元素的链覆盖），并在纯转发之上提供韧性能力：每条链多上游 + 基于健康探测的选择、故障上游自动 failover、安全方法限定的有界指数退避重试（`eth_sendRawTransaction` 永不重试）、以及对连续失败上游的熔断隔离直至探测恢复。运维侧提供 Prometheus 指标（`GET /metrics`）覆盖请求量、错误率、时延分位数、健康与熔断状态，以及 payload 与敏感信息脱敏的结构化 JSON 日志。v1 不支持 WebSocket（`eth_subscribe` 返回 -32601）。
+
+## 架构
 
 ```
                  +--------------------------------------------------+
@@ -44,42 +32,36 @@ WebSocket transport is out of scope for v1 (`eth_subscribe` returns -32601).
                  +----------------+        +----------------+
 ```
 
-All configuration lives in one YAML file; adding a chain requires only a
-config entry plus a new adapter in `internal/chain` — the routing core never
-changes.
+所有配置集中在单个 YAML 文件；新增一条链只需增加一条配置 + 在 `internal/chain` 新增一个 adapter，路由核心无需改动。
 
-| Package | Responsibility |
+| 包 | 职责 |
 |---|---|
-| `cmd/gateway` | The only binary. Flags (`-config`, `-log-level`), config load, wiring of logging/metrics/router/api, HTTP servers, graceful shutdown on SIGINT/SIGTERM |
-| `internal/api` | The single `POST /` JSON-RPC HTTP handler (body-size and batch-element caps, envelope validation, response writing) |
-| `internal/config` | YAML loading with `${VAR}` environment substitution, validation, rejection of unknown fields |
-| `internal/jsonrpc` | Hand-written JSON-RPC 2.0 envelope parse/marshal and error codes (no third-party RPC library) |
-| `internal/chain` | Adapter registry; `ethereum` and `base` adapters self-register via `init()` |
-| `internal/router` | Chain resolution from `X-Chain-Id`, per-chain upstream selection, `RoutingRecord` (source of logs and metrics) |
-| `internal/upstream` | HTTP client and forwarding, failover, bounded backoff retries, circuit breaker |
-| `internal/prober` | Active `eth_chainId` probes on a fixed interval; feeds health state and circuit breakers |
-| `internal/metrics` | Prometheus collectors (see [Metrics](#metrics) below) |
-| `internal/logging` | `slog` structured logger with payload and secret redaction |
+| `cmd/gateway` | 唯一二进制。参数（`-config`、`-log-level`）、配置加载、日志/指标/路由/API 组装、HTTP 服务、SIGINT/SIGTERM 优雅停机 |
+| `internal/api` | 单一 `POST /` JSON-RPC HTTP 处理器（请求体大小与批量元素上限、信封校验、响应写入） |
+| `internal/config` | YAML 加载与 `${VAR}` 环境变量替换、校验、拒绝未知字段 |
+| `internal/jsonrpc` | 手写 JSON-RPC 2.0 信封解析/序列化与错误码（不依赖第三方 RPC 库） |
+| `internal/chain` | 适配器注册表；`ethereum` 与 `base` 适配器通过 `init()` 自注册 |
+| `internal/router` | 基于 `X-Chain-Id` 的链解析、按链的上游选择、`RoutingRecord`（日志与指标的数据源） |
+| `internal/upstream` | HTTP 客户端与转发、failover、有界退避重试、熔断器 |
+| `internal/prober` | 固定间隔的 `eth_chainId` 主动健康探测；驱动健康状态与熔断器 |
+| `internal/metrics` | Prometheus 采集器（见下方[指标](#指标)） |
+| `internal/logging` | 带 payload 与敏感信息脱敏的 `slog` 结构化日志 |
 
-## Quick start
+## 快速开始
 
-Prerequisites: Go >= 1.26. No real RPC credentials needed — the demo uses
-mock upstreams built into the repository (`cmd/mockupstream`), no external
-services.
+前置要求：Go >= 1.26。无需真实 RPC 凭证——演示使用仓库内置的 mock 上游（`cmd/mockupstream`），无外部依赖。
 
 ```bash
-make demo   # starts 2 mock upstreams (chain 1 / 8453) + the gateway
+make demo   # 启动 2 个 mock 上游（chain 1 / 8453）+ 网关
 ```
 
-Expected: the gateway listens on `:8545`, metrics on `:9090`; a health check
-returns `ok`:
+预期：网关监听 `:8545`，指标在 `:9090`；健康检查返回 `ok`：
 
 ```bash
 curl -s localhost:9090/healthz
 ```
 
-Route a request to Base (chain 8453) — the result comes from the Base mock
-upstream:
+向 Base（chain 8453）路由请求——结果来自 Base 的 mock 上游：
 
 ```bash
 curl -s localhost:8545 -H 'Content-Type: application/json' \
@@ -88,8 +70,7 @@ curl -s localhost:8545 -H 'Content-Type: application/json' \
 # -> {"jsonrpc":"2.0","id":1,"result":"0x2105"}
 ```
 
-An unknown chain is rejected with a gateway error in the reserved range and
-nothing is forwarded:
+未知链会被网关保留错误码段直接拒绝，且不会转发：
 
 ```bash
 curl -s localhost:8545 -H 'X-Chain-Id: 999' \
@@ -97,34 +78,28 @@ curl -s localhost:8545 -H 'X-Chain-Id: 999' \
 # -> {"jsonrpc":"2.0","id":2,"error":{"code":-32000,...}}
 ```
 
-Standard client libraries work unmodified — the gateway behaves exactly like a
-direct chain RPC endpoint. See the viem example below.
+标准客户端库可无改动使用——网关表现与直连链 RPC 完全一致。见下方 viem 示例。
 
-Automated validation and performance targets (same as
-`specs/001-multichain-rpc-routing/quickstart.md`):
+自动化校验与性能目标（与 `specs/001-multichain-rpc-routing/quickstart.md` 一致）：
 
-| Target | What it runs |
+| 目标 | 说明 |
 |---|---|
-| `make test` | `go test ./...` — unit (routing, validation, breaker, backoff) + in-process integration on both chains |
-| `make test-conformance` | JSON-RPC 2.0 conformance vectors (id echo, result/error exclusivity, batch ordering, notifications, standard error codes) |
-| `make lint` | `go vet ./...` + `gofmt -l .` (CI-equivalent gate) |
-| `make bench` | In-process passthrough overhead benchmark (direct vs gateway, p50 budget +20%) |
-| `make load` | Sustained load via vegeta (1,000 req/s, gateway round + direct baseline round) |
-| `make demo-failover` | End-to-end failover demo with mock upstream fault injection |
+| `make test` | `go test ./...` —— 单测（路由、校验、熔断、退避）+ 双链进程内集成测试 |
+| `make test-conformance` | JSON-RPC 2.0 一致性向量（id 回显、result/error 互斥、批量顺序、通知、标准错误码） |
+| `make lint` | `go vet ./...` + `gofmt -l .`（与 CI 一致的门禁） |
+| `make bench` | 进程内透传开销基准（直连 vs 网关，p50 预算 +20%） |
+| `make load` | vegeta 持续压测（1,000 req/s，网关一轮 + 直连基线一轮） |
+| `make demo-failover` | 基于 mock 上游故障注入的端到端 failover 演示 |
 
-## Client example (viem)
+## 客户端示例（viem）
 
-The gateway is a drop-in HTTP JSON-RPC endpoint. The only thing a viem client
-must do is send the `X-Chain-Id` header so the gateway knows which chain to
-route to. viem's `http()` transport accepts custom fetch options, which is the
-clean way to inject the header:
+网关是一个开箱即用的 HTTP JSON-RPC 端点。viem 客户端唯一需要做的是在每次请求中携带 `X-Chain-Id` 头以告知网关路由到哪条链。viem 的 `http()` 传输支持自定义 `fetchOptions`，是注入该头的推荐方式：
 
 ```js
-// example.mjs — run with: node example.mjs   (npm i viem)
+// example.mjs — 运行：node example.mjs   (npm i viem)
 import { createPublicClient, defineChain, http } from "viem";
 
-// The gateway requires this header on every request: it selects the target
-// chain (decimal chain id, e.g. "8453" for Base).
+// 网关要求每个请求都携带该头：用于选择目标链（十进制 chain id，如 Base 为 "8453"）。
 const base = defineChain({
   id: 8453,
   name: "Base",
@@ -136,93 +111,74 @@ const client = createPublicClient({
   chain: base,
   transport: http("http://localhost:8545", {
     fetchOptions: {
-      headers: { "X-Chain-Id": "8453" }, // required: routes to chain 8453
+      headers: { "X-Chain-Id": "8453" }, // 必需：路由到 chain 8453
     },
   }),
 });
 
 const chainId = await client.getChainId();      // -> 8453n
-const blockNumber = await client.getBlockNumber(); // -> latest block height
+const blockNumber = await client.getBlockNumber(); // -> 最新块高
 console.log({ chainId: chainId.toString(), blockNumber: blockNumber.toString() });
 ```
 
-Start the demo (`make demo`), then run `node example.mjs`. The same pattern
-works for any chain: point the URL at the gateway, set `X-Chain-Id` to the
-target chain id, and keep a chain object with the matching `id`. Requests
-without the header, or with an unknown chain id, are rejected with a gateway
-error (-32000) and never forwarded.
+先执行 `make demo` 启动演示，再运行 `node example.mjs`。同理适用于任意链：把 URL 指向网关，将 `X-Chain-Id` 设为目标链 id，并保持 chain 对象的 `id` 一致。缺少该头或 chain id 未知时，请求会被网关错误（-32000）拒绝且不会转发。
 
-## Configuration
+## 配置
 
-Configuration is loaded from a YAML file at startup (`-config`, default
-`config.yaml`; see `config.example.yaml`). `${VAR}` placeholders are
-substituted from environment variables before parsing — an unset variable is a
-load error, and unknown YAML fields are rejected. `config.yaml` itself is
-gitignored; only `config.example.yaml` is tracked, and no real URLs or secrets
-are committed. v1 loads configuration once at startup: there is **no hot
-reload**, changes take effect on restart.
+配置在启动时从 YAML 文件加载（`-config`，默认 `config.yaml`；见 `config.example.yaml`）。`${VAR}` 占位符在解析前通过环境变量替换——未设置即报错，未知 YAML 字段会被拒绝。`config.yaml` 本身被 gitignore，仅 `config.example.yaml` 会被提交，不会提交任何真实 URL 或密钥。v1 为启动时一次性加载：**不支持热重载**，改动需重启生效。
 
-| Section | Field | Default | Description |
+| 段 | 字段 | 默认值 | 说明 |
 |---|---|---|---|
-| `server` | `listen` | required | JSON-RPC listen address, e.g. `:8545` |
-| `server` | `metrics_listen` | required | Listen address for `/metrics` + `/healthz`, e.g. `:9090` |
-| `server` | `max_batch_elements` | `100` | Maximum JSON-RPC batch elements per request |
-| `server` | `max_body_bytes` | `1048576` (1 MB) | Maximum request body size |
-| `server.timeouts` | `default` | `10` | Per-attempt upstream timeout in seconds |
-| `server.timeouts` | `eth_getLogs` | — | Method-level timeout override (prefix match, longest match wins) |
-| `prober` | `interval` | `10s` | Active health probe interval |
-| `prober` | `timeout` | `5s` | Per-probe timeout |
-| `prober` | `fail_threshold` | `3` | Consecutive probe failures mark an upstream unhealthy |
-| `retry` | `max_attempts` | `2` | Max attempts for safe methods (includes the first attempt) |
-| `retry` | `base_delay` | `10ms` | Exponential backoff base delay |
-| `retry` | `max_elapsed` | `30s` | Overall retry deadline |
-| `circuit` | `fail_threshold` | `5` | Consecutive failures open the circuit breaker |
-| `circuit` | `cooldown` | `30s` | Open -> half-open cooldown |
-| `chains[]` | `chain_id` | required | Decimal chain id string, unique |
-| `chains[]` | `adapter` | required | Registered adapter name (`ethereum`, `base`) |
-| `chains[].upstreams[]` | `name` | redacted URL | Log/metric alias for the upstream |
-| `chains[].upstreams[]` | `url` | required | Upstream endpoint, `http`/`https` |
+| `server` | `listen` | 必需 | JSON-RPC 监听地址，如 `:8545` |
+| `server` | `metrics_listen` | 必需 | `/metrics` + `/healthz` 监听地址，如 `:9090` |
+| `server` | `max_batch_elements` | `100` | 单次请求最大 JSON-RPC 批量元素数 |
+| `server` | `max_body_bytes` | `1048576` (1 MB) | 最大请求体大小 |
+| `server.timeouts` | `default` | `10` | 单次上游尝试超时（秒） |
+| `server.timeouts` | `eth_getLogs` | — | 方法级超时覆盖（前缀匹配，最长匹配生效） |
+| `prober` | `interval` | `10s` | 主动健康探测间隔 |
+| `prober` | `timeout` | `5s` | 单次探测超时 |
+| `prober` | `fail_threshold` | `3` | 连续失败 N 次后标记为不健康 |
+| `retry` | `max_attempts` | `2` | 安全方法的最大尝试次数（含首次） |
+| `retry` | `base_delay` | `10ms` | 指数退避基线时延 |
+| `retry` | `max_elapsed` | `30s` | 重试总截止时间 |
+| `circuit` | `fail_threshold` | `5` | 连续失败 N 次后打开熔断器 |
+| `circuit` | `cooldown` | `30s` | 打开 → 半开的冷却时间 |
+| `chains[]` | `chain_id` | 必需 | 十进制 chain id 字符串，需唯一 |
+| `chains[]` | `adapter` | 必需 | 已注册的适配器名（`ethereum`、`base`） |
+| `chains[].upstreams[]` | `name` | 脱敏后的 URL | 上游的日志/指标别名 |
+| `chains[].upstreams[]` | `url` | 必需 | 上游地址，`http`/`https` |
 
-Gateway flags: `-config <path>` (default `config.yaml`) and
-`-log-level <debug|info|warn|error>` (default `info`).
+网关启动参数：`-config <path>`（默认 `config.yaml`）与 `-log-level <debug|info|warn|error>`（默认 `info`）。
 
-## Metrics
+## 指标
 
-Prometheus-format metrics are exposed at `GET /metrics` on the metrics
-listener (`:9090` in the demo); liveness/readiness is at `GET /healthz`. All
-gateway metrics use the `gateway_` prefix. Buckets for
-`gateway_request_duration_seconds` are dense on the low end so p50/p95/p99 can
-be computed with `histogram_quantile`.
+Prometheus 格式指标暴露在指标监听器的 `GET /metrics`（演示中为 `:9090`）；存活/就绪探针在 `GET /healthz`。所有网关指标以 `gateway_` 为前缀。`gateway_request_duration_seconds` 的桶在低时延区间更密集，便于通过 `histogram_quantile` 计算 p50/p95/p99。
 
-| Metric | Type | Labels |
+| 指标 | 类型 | 标签 |
 |---|---|---|
 | `gateway_requests_total` | counter | `chain`, `upstream`, `method`, `outcome` |
 | `gateway_request_duration_seconds` | histogram | `chain`, `upstream`, `method` |
 | `gateway_requests_inflight` | gauge | `chain`, `upstream` |
-| `gateway_upstream_up` | gauge (0 unhealthy / 1 healthy / 2 unknown) | `chain`, `upstream` |
+| `gateway_upstream_up` | gauge（0 不健康 / 1 健康 / 2 未知） | `chain`, `upstream` |
 | `gateway_upstream_probe_latency_seconds` | gauge | `chain`, `upstream` |
-| `gateway_upstream_circuit_state` | gauge (0 closed / 1 open / 2 half-open) | `chain`, `upstream` |
+| `gateway_upstream_circuit_state` | gauge（0 关闭 / 1 打开 / 2 半开） | `chain`, `upstream` |
 
-Example:
+示例：
 
 ```bash
 curl -s localhost:9090/metrics | grep gateway_
 # -> gateway_requests_total{chain="8453",upstream="base-a",method="eth_chainId",outcome="success"} 1
 ```
 
-## Benchmark
+## 性能基准
 
-Measured with `make bench` (`go test -bench . -benchtime=10s -count=5 ./bench/`) — two TCP hops
-(bench → server → mock upstream) kept identical for baseline and gateway; the delta
-is the gateway pipeline cost (parse + chain resolution + metrics/logging) excluding
-upstream latency (FR-017 / SC-002).
+通过 `make bench` 测量（`go test -bench . -benchtime=10s -count=5 ./bench/`）——基线与网关保持相同的两跳 TCP 路径（bench → server → mock 上游），差值即为网关流水线的增量开销（解析 + 链解析 + 指标/日志），不含上游本身时延（FR-017 / SC-002）。
 
-**Environment:** `linux/amd64`, `AMD Ryzen 7 5800H with Radeon Graphics (16 cores)`, `Go 1.26.5`, `bench/passthrough_test.go`
-(mock upstream echoes `{"jsonrpc":"2.0","id":<id>,"result":"0x1"}`).
+**环境：** `linux/amd64`、`AMD Ryzen 7 5800H with Radeon Graphics (16 核)`、`Go 1.26.5`、`bench/passthrough_test.go`（mock 上游回显 `{"jsonrpc":"2.0","id":<id>,"result":"0x1"}`）。
 
-**Latest run (2026-08-31, `tee /tmp/bench.txt`):**
+**最新运行（2026-08-31，`tee /tmp/bench.txt`）：**
 
-| run | BenchmarkPassthrough p50_ns/op | ns/op | BenchmarkGateway p50_ns/op | ns/op | Δ p50 |
+| 轮次 | BenchmarkPassthrough p50_ns/op | ns/op | BenchmarkGateway p50_ns/op | ns/op | Δ p50 |
 |-----|-------------------------------:|------:|---------------------------:|------:|------:|
 | 1 | 1 009 530 | 1 052 340 | 1 152 854 | 1 182 407 | +14.2% |
 | 2 | 1 000 524 | 1 020 564 | 1 127 497 | 1 158 025 | +12.7% |
@@ -230,20 +186,20 @@ upstream latency (FR-017 / SC-002).
 | 4 |   995 077 | 1 015 483 | 1 142 843 | 1 182 548 | +14.8% |
 | 5 | 1 057 237 | 1 081 621 | 1 182 315 | 1 228 226 | +11.8% |
 
-- Median p50: passthrough **1 000 524 ns** → gateway **1 142 843 ns**, overhead **+142 319 ns (+14.2%)** ≤ budget **+20%** ✅
-- Mean p50: 1 011 767 ns → 1 140 326 ns (**+12.7%**) — also within budget
-- Mean ns/op (timer): 1 037 285 ns → 1 172 715 ns (**+13.1%**)
+- 中位数 p50：基线 **1 000 524 ns** → 网关 **1 142 843 ns**，开销 **+142 319 ns (+14.2%)** ≤ 预算 **+20%** ✅
+- 均值 p50：1 011 767 ns → 1 140 326 ns（**+12.7%**）—— 同样在预算内
+- 均值 ns/op（timer）：1 037 285 ns → 1 172 715 ns（**+13.1%**）
 
-All 5 runs pass individually (worst +14.8% / +18.8% on ns/op basis on run 5 still < +20%). Prior acceptance (T049) was +8.2% on a faster host; variance is host/ambient-load dependent but budget holds.
+5 轮均单独通过（最差 +14.8% / 按 ns/op 计 +18.8% 的第 5 轮仍 < +20%）。此前验收（T049）为 +8.2%（更快宿主机）；波动与宿主机/环境负载相关，但预算始终满足。
 
-Reproduce:
+复现：
 
 ```bash
 make bench
-# raw: go test -bench . -benchtime=10s -count=5 ./bench/ | tee /tmp/bench.txt
+# 原始命令：go test -bench . -benchtime=10s -count=5 ./bench/ | tee /tmp/bench.txt
 ```
 
-Full raw output (`/tmp/bench.txt`):
+完整原始输出（`/tmp/bench.txt`）：
 
 ```
 BenchmarkPassthrough-16    10000    1052340 ns/op    1009530 p50_ns/op
@@ -258,16 +214,12 @@ BenchmarkGateway-16        10000    1182548 ns/op    1142843 p50_ns/op
 BenchmarkGateway-16         8229    1228226 ns/op    1182315 p50_ns/op
 ```
 
-See `bench/passthrough_test.go:reportP50` for p50 calculation and `specs/001-multichain-rpc-routing/quickstart.md §4` / `.github/workflows/ci.yml` for the CI gate.
+p50 计算见 `bench/passthrough_test.go:reportP50`，CI 门禁见 `specs/001-multichain-rpc-routing/quickstart.md §4` / `.github/workflows/ci.yml`。
 
-## Reference
+## 参考资料
 
-- Feature spec: `specs/001-multichain-rpc-routing/spec.md`
-- Runbook (end-to-end verification): `specs/001-multichain-rpc-routing/quickstart.md`
-- Contracts (normative): `specs/001-multichain-rpc-routing/contracts/` —
-  `jsonrpc-api.md` (JSON-RPC envelope and error codes, including the gateway
-  reserved range **-32000..-32005**: unknown chain -32000, upstream
-  unavailable -32001, batch over cap -32003, body too large -32004, timeout
-  -32005), `config-contract.md`, `metrics-contract.md`
-- Data model and routing order: `specs/001-multichain-rpc-routing/data-model.md`
-- Architecture decision records: `docs/adr/`
+- 功能规格：`specs/001-multichain-rpc-routing/spec.md`
+- 端到端验证手册：`specs/001-multichain-rpc-routing/quickstart.md`
+- 契约（规范性）：`specs/001-multichain-rpc-routing/contracts/` —— `jsonrpc-api.md`（JSON-RPC 信封与错误码，含网关保留段 **-32000..-32005**：未知链 -32000、上游不可用 -32001、批量超限 -32003、请求体过大 -32004、超时 -32005）、`config-contract.md`、`metrics-contract.md`
+- 数据模型与路由顺序：`specs/001-multichain-rpc-routing/data-model.md`
+- 架构决策记录：`docs/adr/`
